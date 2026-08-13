@@ -13,12 +13,6 @@ touch-mtc-monitor/
 └── docs/        # API contract, schema notes, planning docs
 ```
 
-## Owners
-
-- **Agent** (`/agent`) — Carla
-- **Backend + scoring engine** (`/backend`) — [You]
-- **Dashboard** (`/dashboard`) — joint, Days 9–10
-
 ## Getting started
 
 ### Backend
