@@ -1,0 +1,6 @@
+# Windows-only agent — these deps require Windows to install/run
+psutil==6.0.0
+pywin32==306; sys_platform == "win32"
+pygetwindow==0.0.9; sys_platform == "win32"
+requests==2.32.3
+python-dotenv==1.0.1

@@ -1,0 +1,33 @@
+# --- Python (backend, agent) ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+*.db
+*.sqlite3
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node / React (dashboard) ---
+node_modules/
+dist/
+build/
+.vite/
+*.local
+
+# --- OS / Editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# --- Project-specific ---
+# Never commit real employee activity data or exported reports
+/backend/data/
+/agent/data/
+*.pdf
+!dashboard/public/**/*.pdf
