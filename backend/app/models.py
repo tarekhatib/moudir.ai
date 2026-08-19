@@ -1,75 +1,99 @@
-"""
-Draft schema — finalize together on Day 2, adjust field names/types as
-the real config JSON shape and agent payload get nailed down.
-"""
-
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, JSON
+
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, JSON, String
 from sqlalchemy.orm import relationship
 
-from app.database import Base
+from .database import Base
 
 
 class Employee(Base):
-    __tablename__ = "employees"
+    """Employees tracked by the system."""
 
-    id = Column(Integer, primary_key=True)
+    __tablename__ = "employees"
+    id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
-    role = Column(String)
-    job_description = Column(String)
+    role = Column(String, nullable=True)
+    email = Column(String, unique=True, nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
-    config = relationship("EmployeeConfig", back_populates="employee", uselist=False)
+    configs = relationship("Config", back_populates="employee")
     activity_logs = relationship("ActivityLog", back_populates="employee")
     daily_scores = relationship("DailyScore", back_populates="employee")
 
 
-class EmployeeConfig(Base):
+class Config(Base):
+    """Employee configuration for scoring & tracking."""
+
     __tablename__ = "configs"
+    id = Column(Integer, primary_key=True, index=True)
+    employee_id = Column(
+        Integer, ForeignKey("employees.id"), nullable=False, index=True
+    )
 
-    id = Column(Integer, primary_key=True)
-    employee_id = Column(Integer, ForeignKey("employees.id"), unique=True)
+    job_description = Column(String, nullable=True)
+    role_tag = Column(String, nullable=True)
+    software_weights = Column(JSON, default={})
+    category_weights = Column(JSON, default={})
+    schedule = Column(JSON, default={})
+    min_productive_hours = Column(Float, default=6.0)
+    max_idle_minutes = Column(Integer, default=60)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    software_weights = Column(JSON)       # {"vscode": "high", "facebook.com": "low", ...}
-    category_weights = Column(JSON)       # {"app_usage": 0.4, "browser": 0.2, ...}
-    schedule = Column(JSON)               # {"mon": ["09:00", "17:00"], ...}
-    min_productive_hours = Column(Float)
-    max_idle_minutes = Column(Float)
-
-    employee = relationship("Employee", back_populates="config")
+    employee = relationship("Employee", back_populates="configs")
 
 
 class ActivityLog(Base):
-    __tablename__ = "activity_logs"
+    """Raw activity events from the agent."""
 
-    id = Column(Integer, primary_key=True)
-    employee_id = Column(Integer, ForeignKey("employees.id"))
-    timestamp = Column(DateTime, default=datetime.utcnow)
-    event_type = Column(String)   # login, logout, app_focus, idle, browser_tab, outlook
-    detail = Column(JSON)         # flexible payload per event_type
+    __tablename__ = "activity_logs"
+    id = Column(Integer, primary_key=True, index=True)
+    employee_id = Column(
+        Integer, ForeignKey("employees.id"), nullable=False, index=True
+    )
+    event_type = Column(String, nullable=False, index=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    detail = Column(JSON, default={})
+
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     employee = relationship("Employee", back_populates="activity_logs")
 
 
 class DailyScore(Base):
-    __tablename__ = "daily_scores"
+    """Computed daily productivity score."""
 
-    id = Column(Integer, primary_key=True)
-    employee_id = Column(Integer, ForeignKey("employees.id"))
-    date = Column(DateTime)
-    category_scores = Column(JSON)   # per-category breakdown
-    total_score = Column(Float)
+    __tablename__ = "daily_scores"
+    id = Column(Integer, primary_key=True, index=True)
+    employee_id = Column(
+        Integer, ForeignKey("employees.id"), nullable=False, index=True
+    )
+    date = Column(DateTime, nullable=False, index=True)
+
+    score = Column(Float, nullable=False)
+    category_scores = Column(JSON, default={})
+
+    created_at = Column(DateTime, default=datetime.utcnow)
 
     employee = relationship("Employee", back_populates="daily_scores")
 
 
 class Report(Base):
-    __tablename__ = "reports"
+    """Aggregated reports (weekly, monthly)."""
 
-    id = Column(Integer, primary_key=True)
-    employee_id = Column(Integer, ForeignKey("employees.id"))
-    period_type = Column(String)   # daily, weekly, monthly
-    period_start = Column(DateTime)
-    period_end = Column(DateTime)
-    summary = Column(JSON)
-    generated_at = Column(DateTime, default=datetime.utcnow)
+    __tablename__ = "reports"
+    id = Column(Integer, primary_key=True, index=True)
+    employee_id = Column(
+        Integer, ForeignKey("employees.id"), nullable=False, index=True
+    )
+
+    period = Column(String, nullable=False, index=True)
+    period_start = Column(DateTime, nullable=False)
+    period_end = Column(DateTime, nullable=False)
+
+    average_score = Column(Float, nullable=False)
+    total_productive_hours = Column(Float, default=0.0)
+    total_idle_minutes = Column(Integer, default=0)
+    event_summary = Column(JSON, default={})
+
+    created_at = Column(DateTime, default=datetime.utcnow)

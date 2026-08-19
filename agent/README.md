@@ -1,7 +1,8 @@
-# Tracking Agent
+# Moudir.ai Tracking Agent
 
-Windows-only. Must be developed and tested on the Lenovo (or any Windows machine) —
-`pywin32` and `pygetwindow` won't install on macOS/Linux.
+The agent is a silent Windows background process that records activity events for the
+pilot employee. Day 3 can be prototyped on macOS with the fallback in `main.py`; the
+real active-window tracking requires Windows and `pywin32`.
 
 ## Setup
 
@@ -9,24 +10,18 @@ Windows-only. Must be developed and tested on the Lenovo (or any Windows machine
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-copy .env.example .env
+```
+
+Create `.env` manually with `BACKEND_URL`, `AGENT_TOKEN`, `EMPLOYEE_ID`, and
+`SYNC_INTERVAL_SECONDS` before starting the agent. Keep `.env` private.
+
+```bat
 python main.py
 ```
 
-## Transparency / consent
+## Current scope
 
-Per the open question from planning: decide whether this runs with a visible tray
-icon/notification (recommended for consent/transparency) or fully silent, before
-building the service wrapper on Day 8. This affects whether we need a small tray UI
-component in addition to the background service.
-
-## Notes
-
-- Idle detection: `win32api.GetLastInputInfo()` gives milliseconds since last
-  keyboard/mouse input — no actual keystrokes are captured or stored, matching
-  the "activity level, not keylogging" approach from the original scoping.
-- Outlook: `win32com.client.Dispatch("Outlook.Application")` — requires Outlook
-  installed and the desktop (not just web) client running.
-- Browser tracking: reading the active window title only for now (e.g. tab title
-  in Chrome/Edge's title bar) — no browser extension, no full URL history. That's
-  a possible post-pilot addition, not in scope for the 12 days.
+- Day 3: login/logout events and active-window tracking with an in-memory buffer.
+- Day 4: idle detection and local SQLite buffering.
+- Day 5: backend synchronization and retry handling.
+- Later: Outlook activity, browser tab titles, and crash recovery.
