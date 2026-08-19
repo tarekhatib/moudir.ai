@@ -83,22 +83,18 @@ def poll_active_window():
 
     print(f"Starting active window polling (interval: {POLL_INTERVAL_SECONDS}s)...")
 
-    try:
-        while True:
-            app_name, window_title = get_active_window()
+    while True:
+        app_name, window_title = get_active_window()
 
-            if app_name and (app_name != last_app or window_title != last_title):
-                log_event(
-                    "app_focus",
-                    {"app_name": app_name, "window_title": window_title or ""},
-                )
-                last_app = app_name
-                last_title = window_title
+        if app_name and (app_name != last_app or window_title != last_title):
+            log_event(
+                "app_focus",
+                {"app_name": app_name, "window_title": window_title or ""},
+            )
+            last_app = app_name
+            last_title = window_title
 
-            time.sleep(POLL_INTERVAL_SECONDS)
-
-    except KeyboardInterrupt:
-        print("\nActive window polling stopped.")
+        time.sleep(POLL_INTERVAL_SECONDS)
 
 
 def main_loop():
