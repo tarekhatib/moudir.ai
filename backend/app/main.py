@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, Depends, Header, HTTPException, Query, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -33,6 +34,19 @@ load_dotenv()
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Moudir.ai Backend")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 AGENT_TOKEN = os.getenv("AGENT_TOKEN")
 REPORTS_DIR = Path(__file__).resolve().parent.parent / "docs" / "reports"
