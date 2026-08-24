@@ -1,11 +1,16 @@
 import os
+from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from dotenv import load_dotenv
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/moudir.db")
+if DATABASE_URL.startswith("sqlite:///./"):
+    relative_db_path = DATABASE_URL.removeprefix("sqlite:///./")
+    DATABASE_URL = f"sqlite:///{(BASE_DIR / relative_db_path).resolve()}"
 
 engine = create_engine(
     DATABASE_URL,
