@@ -66,6 +66,14 @@ class IngestPayload(BaseModel):
     events: list[ActivityEventCreate]
 
 
+class EmployeeProfilePayload(BaseModel):
+    name: str
+    role: str | None = None
+    email: str | None = None
+    job_description: str | None = None
+    role_tag: str | None = None
+
+
 class ConfigPayload(BaseModel):
     job_description: str | None = None
     role_tag: str | None = None
@@ -113,6 +121,105 @@ def ingest_events(
     db.commit()
 
     return {"status": "success", "events_stored": stored_count}
+
+
+@app.get("/employees")
+def list_employees(db: Session = Depends(get_db)):
+    employees = db.query(models.Employee).order_by(models.Employee.id.asc()).all()
+    rows = []
+    for employee in employees:
+        config = db.query(models.Config).filter(models.Config.employee_id == employee.id).first()
+        rows.append(
+            {
+                "id": employee.id,
+                "name": employee.name,
+                "role": employee.role,
+                "email": employee.email,
+                "job_description": config.job_description if config else None,
+                "role_tag": config.role_tag if config else None,
+            }
+        )
+    return rows
+
+
+@app.post("/employees")
+def create_employee(payload: EmployeeProfilePayload, db: Session = Depends(get_db)):
+    employee = models.Employee(
+        name=payload.name,
+        role=payload.role,
+        email=payload.email,
+    )
+    db.add(employee)
+    db.commit()
+    db.refresh(employee)
+
+    config = db.query(models.Config).filter(models.Config.employee_id == employee.id).first()
+    if config is None:
+        config = models.Config(employee_id=employee.id)
+        db.add(config)
+
+    config.job_description = payload.job_description
+    config.role_tag = payload.role_tag
+    db.commit()
+    db.refresh(config)
+
+    return {
+        "id": employee.id,
+        "name": employee.name,
+        "role": employee.role,
+        "email": employee.email,
+        "job_description": config.job_description,
+        "role_tag": config.role_tag,
+    }
+
+
+@app.get("/employees/{employee_id}")
+def get_employee(employee_id: int, db: Session = Depends(get_db)):
+    employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    config = db.query(models.Config).filter(models.Config.employee_id == employee_id).first()
+    return {
+        "id": employee.id,
+        "name": employee.name,
+        "role": employee.role,
+        "email": employee.email,
+        "job_description": config.job_description if config else None,
+        "role_tag": config.role_tag if config else None,
+    }
+
+
+@app.put("/employees/{employee_id}")
+def update_employee(employee_id: int, payload: EmployeeProfilePayload, db: Session = Depends(get_db)):
+    employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+
+    employee.name = payload.name
+    employee.role = payload.role
+    employee.email = payload.email
+
+    config = db.query(models.Config).filter(models.Config.employee_id == employee_id).first()
+    if config is None:
+        config = models.Config(employee_id=employee_id)
+        db.add(config)
+
+    config.job_description = payload.job_description
+    config.role_tag = payload.role_tag
+
+    db.commit()
+    db.refresh(employee)
+    db.refresh(config)
+
+    return {
+        "id": employee.id,
+        "name": employee.name,
+        "role": employee.role,
+        "email": employee.email,
+        "job_description": config.job_description,
+        "role_tag": config.role_tag,
+    }
 
 
 @app.get("/config/{employee_id}")

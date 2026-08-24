@@ -1,5 +1,5 @@
 .dashboard-shell {
-  max-width: 1100px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 40px 20px 60px;
 }
@@ -45,14 +45,23 @@
   color: #0f9d58;
 }
 
-.primary-button {
+.primary-button,
+.secondary-button {
   border: none;
   border-radius: 12px;
-  background: linear-gradient(135deg, #6c63ff, #5ac8fa);
-  color: white;
   padding: 10px 16px;
   font-weight: 700;
   cursor: pointer;
+}
+
+.primary-button {
+  background: linear-gradient(135deg, #6c63ff, #5ac8fa);
+  color: white;
+}
+
+.secondary-button {
+  background: #eef2ff;
+  color: #312e81;
 }
 
 .toolbar {
@@ -82,6 +91,74 @@
   background: white;
   color: #111827;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.employee-manager {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 18px;
+  margin-bottom: 24px;
+}
+
+.employee-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.employee-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  border: 1px solid #e5e7eb;
+  background: white;
+  border-radius: 12px;
+  padding: 12px 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.employee-item.selected {
+  border-color: #7c6dff;
+  background: #f5f3ff;
+}
+
+.employee-item small {
+  color: #667085;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-weight: 600;
+  color: #344054;
+}
+
+.full-width {
+  grid-column: 1 / -1;
+}
+
+input,
+textarea {
+  border: 1px solid #d0d5dd;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+  background: white;
+}
+
+textarea {
+  min-height: 110px;
+  resize: vertical;
 }
 
 .stats-grid {
@@ -190,13 +267,13 @@
 
 @media (max-width: 760px) {
   .topbar,
-  .topbar-actions {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
+  .topbar-actions,
+  .employee-manager,
+  .form-grid,
   .stats-grid,
   .content-grid {
     grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

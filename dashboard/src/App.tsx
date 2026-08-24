@@ -3,6 +3,15 @@ import './App.css'
 
 type Period = 'daily' | 'weekly' | 'monthly'
 
+type Employee = {
+  id: number
+  name: string
+  role: string | null
+  email: string | null
+  job_description: string | null
+  role_tag: string | null
+}
+
 type Summary = {
   employee_id: number
   period: Period
@@ -32,9 +41,18 @@ async function fetchJSON<T>(input: string): Promise<T> {
 function App() {
   const [period, setPeriod] = useState<Period>('daily')
   const [health, setHealth] = useState('Checking...')
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<number | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [form, setForm] = useState({
+    name: '',
+    role: '',
+    email: '',
+    job_description: '',
+    role_tag: '',
+  })
 
   useEffect(() => {
     let isMounted = true
@@ -45,9 +63,19 @@ function App() {
         if (!isMounted) return
         setHealth(healthResponse.status)
 
-        const report = await fetchJSON<Summary>(`${API_URL}/reports/1?period=${period}`)
+        const employeeList = await fetchJSON<Employee[]>(`${API_URL}/employees`)
         if (!isMounted) return
-        setSummary(report)
+        setEmployees(employeeList)
+
+        if (employeeList.length > 0) {
+          const activeId = selectedEmployeeId ?? employeeList[0].id
+          setSelectedEmployeeId(activeId)
+          const report = await fetchJSON<Summary>(`${API_URL}/reports/${activeId}?period=${period}`)
+          if (!isMounted) return
+          setSummary(report)
+        } else {
+          setSummary(null)
+        }
         setError(null)
       } catch (loadError) {
         if (!isMounted) return
@@ -67,6 +95,43 @@ function App() {
     }
   }, [period])
 
+  useEffect(() => {
+    if (!selectedEmployeeId) return
+
+    const employee = employees.find((item) => item.id === selectedEmployeeId)
+    if (!employee) return
+
+    setForm({
+      name: employee.name,
+      role: employee.role ?? '',
+      email: employee.email ?? '',
+      job_description: employee.job_description ?? '',
+      role_tag: employee.role_tag ?? '',
+    })
+  }, [employees, selectedEmployeeId])
+
+  useEffect(() => {
+    if (!selectedEmployeeId) return
+
+    let isMounted = true
+
+    async function loadSummary() {
+      try {
+        const report = await fetchJSON<Summary>(`${API_URL}/reports/${selectedEmployeeId}?period=${period}`)
+        if (!isMounted) return
+        setSummary(report)
+      } catch {
+        if (!isMounted) return
+        setError('Unable to load employee report')
+      }
+    }
+
+    void loadSummary()
+    return () => {
+      isMounted = false
+    }
+  }, [selectedEmployeeId, period])
+
   const scoreTone = useMemo(() => {
     if (!summary) return 'neutral'
     if (summary.average_score >= 0.75) return 'good'
@@ -75,7 +140,9 @@ function App() {
   }, [summary])
 
   const handleDownload = async () => {
-    const response = await fetch(`${API_URL}/reports/1/pdf?period=${period}`)
+    if (!selectedEmployeeId) return
+
+    const response = await fetch(`${API_URL}/reports/${selectedEmployeeId}/pdf?period=${period}`)
     if (!response.ok) {
       throw new Error(`PDF request failed: ${response.status}`)
     }
@@ -84,9 +151,68 @@ function App() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `report-${period}.pdf`
+    link.download = `report-${selectedEmployeeId}-${period}.pdf`
     link.click()
     URL.revokeObjectURL(url)
+  }
+
+  const handleFormChange = (field: keyof typeof form, value: string) => {
+    setForm((current) => ({ ...current, [field]: value }))
+  }
+
+  const handleSaveEmployee = async () => {
+    if (!selectedEmployeeId) return
+
+    const payload = {
+      name: form.name,
+      role: form.role,
+      email: form.email,
+      job_description: form.job_description,
+      role_tag: form.role_tag,
+    }
+
+    const response = await fetch(`${API_URL}/employees/${selectedEmployeeId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+
+    if (!response.ok) {
+      throw new Error(`Save failed: ${response.status}`)
+    }
+
+    const updated = await response.json()
+    setEmployees((current) =>
+      current.map((employee) =>
+        employee.id === updated.id
+          ? { ...employee, ...updated }
+          : employee,
+      ),
+    )
+  }
+
+  const handleCreateEmployee = async () => {
+    const payload = {
+      name: form.name || 'New Employee',
+      role: form.role,
+      email: form.email,
+      job_description: form.job_description,
+      role_tag: form.role_tag,
+    }
+
+    const response = await fetch(`${API_URL}/employees`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+
+    if (!response.ok) {
+      throw new Error(`Create failed: ${response.status}`)
+    }
+
+    const created = await response.json()
+    setEmployees((current) => [...current, created])
+    setSelectedEmployeeId(created.id)
   }
 
   return (
@@ -94,15 +220,17 @@ function App() {
       <header className="topbar">
         <div>
           <p className="eyebrow">Moudir.ai</p>
-          <h1>Employee dashboard</h1>
+          <h1>Admin dashboard</h1>
         </div>
         <div className="topbar-actions">
           <div className={`status-pill ${health === 'ok' ? 'online' : ''}`}>
             Backend: {health}
           </div>
-          <button type="button" className="primary-button" onClick={() => void handleDownload()}>
-            Download PDF
-          </button>
+          {selectedEmployeeId ? (
+            <button type="button" className="primary-button" onClick={() => void handleDownload()}>
+              Download PDF
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -118,6 +246,57 @@ function App() {
               {item}
             </button>
           ))}
+        </div>
+      </section>
+
+      <section className="employee-manager">
+        <div className="panel">
+          <h2>Employees</h2>
+          <div className="employee-list">
+            {employees.map((employee) => (
+              <button
+                key={employee.id}
+                type="button"
+                className={selectedEmployeeId === employee.id ? 'employee-item selected' : 'employee-item'}
+                onClick={() => setSelectedEmployeeId(employee.id)}
+              >
+                <span>{employee.name}</span>
+                <small>#{employee.id}</small>
+              </button>
+            ))}
+          </div>
+          <button type="button" className="secondary-button" onClick={() => void handleCreateEmployee()}>
+            Add employee
+          </button>
+        </div>
+
+        <div className="panel form-panel">
+          <h2>Employee profile</h2>
+          <div className="form-grid">
+            <label>
+              Full name
+              <input value={form.name} onChange={(event) => handleFormChange('name', event.target.value)} />
+            </label>
+            <label>
+              Role
+              <input value={form.role} onChange={(event) => handleFormChange('role', event.target.value)} />
+            </label>
+            <label>
+              Email
+              <input value={form.email} onChange={(event) => handleFormChange('email', event.target.value)} />
+            </label>
+            <label>
+              Role tag
+              <input value={form.role_tag} onChange={(event) => handleFormChange('role_tag', event.target.value)} />
+            </label>
+            <label className="full-width">
+              Job description
+              <textarea value={form.job_description} onChange={(event) => handleFormChange('job_description', event.target.value)} />
+            </label>
+          </div>
+          <button type="button" className="primary-button" onClick={() => void handleSaveEmployee()}>
+            Save employee
+          </button>
         </div>
       </section>
 
