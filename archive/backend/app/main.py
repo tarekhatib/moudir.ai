@@ -5,7 +5,8 @@ from pathlib import Path
 from fastapi import FastAPI, Depends, Header, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from dotenv import load_dotenv
@@ -26,10 +27,11 @@ except Exception:  # pragma: no cover - only needed if reportlab missing
     SimpleDocTemplate = None
     Spacer = None
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
+
 from .database import Base, engine, get_db
 from . import models  # noqa — ensures models are registered before create_all
-
-load_dotenv()
 
 Base.metadata.create_all(bind=engine)
 
@@ -73,6 +75,22 @@ class EmployeeProfilePayload(BaseModel):
     job_description: str | None = None
     role_tag: str | None = None
 
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("name must not be empty")
+        return value
+
+    @field_validator("role", "email", "job_description", "role_tag", mode="before")
+    @classmethod
+    def normalize_optional_strings(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
+
 
 class ConfigPayload(BaseModel):
     job_description: str | None = None
@@ -82,6 +100,14 @@ class ConfigPayload(BaseModel):
     schedule: dict = Field(default_factory=dict)
     min_productive_hours: float = 6.0
     max_idle_minutes: int = 60
+
+    @field_validator("job_description", "role_tag", mode="before")
+    @classmethod
+    def normalize_optional_strings(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.strip()
+        return value or None
 
 
 @app.get("/health")
@@ -97,6 +123,30 @@ def verify_agent_token(x_agent_token: str = Header(None)):
             detail="Invalid or missing X-Agent-Token",
         )
     return x_agent_token
+
+
+def _get_employee(employee_id: int, db: Session):
+    employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
+    if employee is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    return employee
+
+
+def _commit_employee_change(db: Session):
+    try:
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        err_msg = str(error).lower()
+        if "email" in err_msg or "unique" in err_msg:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An employee with this email already exists",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to save employee",
+        )
 
 
 @app.post("/ingest")
@@ -144,13 +194,21 @@ def list_employees(db: Session = Depends(get_db)):
 
 @app.post("/employees")
 def create_employee(payload: EmployeeProfilePayload, db: Session = Depends(get_db)):
+    if payload.email:
+        existing = db.query(models.Employee).filter(models.Employee.email == payload.email).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An employee with this email already exists",
+            )
+
     employee = models.Employee(
         name=payload.name,
         role=payload.role,
         email=payload.email,
     )
     db.add(employee)
-    db.commit()
+    _commit_employee_change(db)
     db.refresh(employee)
 
     config = db.query(models.Config).filter(models.Config.employee_id == employee.id).first()
@@ -160,7 +218,7 @@ def create_employee(payload: EmployeeProfilePayload, db: Session = Depends(get_d
 
     config.job_description = payload.job_description
     config.role_tag = payload.role_tag
-    db.commit()
+    _commit_employee_change(db)
     db.refresh(config)
 
     return {
@@ -175,10 +233,7 @@ def create_employee(payload: EmployeeProfilePayload, db: Session = Depends(get_d
 
 @app.get("/employees/{employee_id}")
 def get_employee(employee_id: int, db: Session = Depends(get_db)):
-    employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
-
+    employee = _get_employee(employee_id, db)
     config = db.query(models.Config).filter(models.Config.employee_id == employee_id).first()
     return {
         "id": employee.id,
@@ -192,9 +247,18 @@ def get_employee(employee_id: int, db: Session = Depends(get_db)):
 
 @app.put("/employees/{employee_id}")
 def update_employee(employee_id: int, payload: EmployeeProfilePayload, db: Session = Depends(get_db)):
-    employee = db.query(models.Employee).filter(models.Employee.id == employee_id).first()
-    if not employee:
-        raise HTTPException(status_code=404, detail="Employee not found")
+    employee = _get_employee(employee_id, db)
+
+    if payload.email:
+        existing = db.query(models.Employee).filter(
+            models.Employee.email == payload.email,
+            models.Employee.id != employee_id,
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="An employee with this email already exists",
+            )
 
     employee.name = payload.name
     employee.role = payload.role
@@ -208,7 +272,7 @@ def update_employee(employee_id: int, payload: EmployeeProfilePayload, db: Sessi
     config.job_description = payload.job_description
     config.role_tag = payload.role_tag
 
-    db.commit()
+    _commit_employee_change(db)
     db.refresh(employee)
     db.refresh(config)
 
@@ -224,6 +288,7 @@ def update_employee(employee_id: int, payload: EmployeeProfilePayload, db: Sessi
 
 @app.get("/config/{employee_id}")
 def get_config(employee_id: int, db: Session = Depends(get_db)):
+    _get_employee(employee_id, db)
     config = db.query(models.Config).filter(models.Config.employee_id == employee_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Config not found")
@@ -246,6 +311,7 @@ def save_config(
     payload: ConfigPayload,
     db: Session = Depends(get_db),
 ):
+    _get_employee(employee_id, db)
     config = db.query(models.Config).filter(models.Config.employee_id == employee_id).first()
     if not config:
         config = models.Config(employee_id=employee_id)
@@ -275,6 +341,7 @@ def save_config(
 
 
 def _score_logs_for_period(employee_id: int, db: Session, period: str):
+    _get_employee(employee_id, db)
     today = datetime.utcnow().date()
     if period == "daily":
         start = datetime.combine(today, datetime.min.time())
@@ -345,7 +412,7 @@ def _score_logs_for_period(employee_id: int, db: Session, period: str):
 @app.get("/reports/{employee_id}")
 def get_reports(
     employee_id: int,
-    period: str = Query("daily", regex="daily|weekly|monthly"),
+    period: str = Query("daily", pattern="^(daily|weekly|monthly)$"),
     db: Session = Depends(get_db),
 ):
     return _score_logs_for_period(employee_id, db, period)
@@ -354,7 +421,7 @@ def get_reports(
 @app.get("/reports/{employee_id}/pdf")
 def export_report_pdf(
     employee_id: int,
-    period: str = Query("daily", regex="daily|weekly|monthly"),
+    period: str = Query("daily", pattern="^(daily|weekly|monthly)$"),
     db: Session = Depends(get_db),
 ):
     summary = _score_logs_for_period(employee_id, db, period)
