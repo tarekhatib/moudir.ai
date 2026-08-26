@@ -1,6 +1,6 @@
 # Moudir.ai Scoring Heuristics & Algorithm
 
-This document details the productivity scoring algorithm and metrics computation implemented in the Moudir.ai pilot backend (`archive/backend/app/main.py`).
+This document details the productivity scoring algorithm and metrics computation implemented in the Moudir.ai pilot backend (`backend/app/main.py`).
 
 ---
 

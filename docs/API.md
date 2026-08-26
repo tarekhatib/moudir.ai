@@ -1,6 +1,6 @@
 # Moudir.ai Backend API Reference
 
-This document provides a comprehensive technical specification for the Moudir.ai REST API endpoints exposed by the FastAPI backend (`archive/backend/`).
+This document provides a comprehensive technical specification for the Moudir.ai REST API endpoints exposed by the FastAPI backend (`backend/`).
 
 ---
 

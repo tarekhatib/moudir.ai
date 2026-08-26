@@ -19,7 +19,7 @@ This guide provides a step-by-step walkthrough for running an end-to-end local d
 In **Terminal 1**:
 ```bash
 # Navigate to the active backend directory
-cd archive/backend
+cd backend
 
 # Create and activate virtual environment (if not already done)
 python3 -m venv .venv
@@ -162,12 +162,12 @@ Output:
 - **Frontend**: If port 5173 is in use, Vite will automatically offer port 5174.
 
 ### Missing `AGENT_TOKEN` (401 Unauthorized)
-- Ensure `archive/backend/.env` exists and contains `AGENT_TOKEN=pilot_secret_agent_token_123`.
+- Ensure `backend/.env` exists and contains `AGENT_TOKEN=pilot_secret_agent_token_123`.
 - Ensure requests to `POST /ingest` include the header `X-Agent-Token: pilot_secret_agent_token_123`.
 
 ### Backend Unreachable / CORS Issues
 - Check that the backend is running and responds to `curl http://localhost:8000/health`.
-- If running on a custom host or port, ensure CORS origins in `archive/backend/app/main.py` include your dashboard URL.
+- If running on a custom host or port, ensure CORS origins in `backend/app/main.py` include your dashboard URL.
 
 ### PDF Generator Unavailable (500 Error on PDF export)
 - Ensure `weasyprint` or `reportlab` is installed in your backend Python environment:
