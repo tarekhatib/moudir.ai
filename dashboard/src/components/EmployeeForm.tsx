@@ -8,6 +8,8 @@ type Props = {
   saving: boolean
   onSave: (input: EmployeeInput) => void
   onCancel?: () => void
+  onDelete?: () => void
+  deleting?: boolean
 }
 
 const EMPTY: EmployeeInput = { name: '', role: '', email: '', job_description: '', role_tag: '' }
@@ -23,14 +25,16 @@ function toInput(employee: Employee | null): EmployeeInput {
   }
 }
 
-export function EmployeeForm({ employee, saving, onSave, onCancel }: Props) {
+export function EmployeeForm({ employee, saving, onSave, onCancel, onDelete, deleting = false }: Props) {
   const [form, setForm] = useState<EmployeeInput>(() => toInput(employee))
   const [errors, setErrors] = useState<EmployeeErrors>({})
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   // Reset the form whenever a different employee (or "new") is shown.
   useEffect(() => {
     setForm(toInput(employee))
     setErrors({})
+    setConfirmingDelete(false)
   }, [employee])
 
   const update = (field: keyof EmployeeInput, value: string) => {
@@ -80,7 +84,33 @@ export function EmployeeForm({ employee, saving, onSave, onCancel }: Props) {
             Cancel
           </button>
         ) : null}
+        {employee && onDelete && !confirmingDelete ? (
+          <button
+            type="button"
+            className="danger-link"
+            onClick={() => setConfirmingDelete(true)}
+            disabled={saving || deleting}
+          >
+            Delete employee
+          </button>
+        ) : null}
       </div>
+      {employee && onDelete && confirmingDelete ? (
+        <div className="confirm-box" role="alertdialog" aria-label="Confirm delete">
+          <p>
+            Delete <strong>{employee.name}</strong>? This also removes their settings and all recorded activity. This
+            cannot be undone.
+          </p>
+          <div className="form-actions">
+            <button type="button" className="danger-button" onClick={onDelete} disabled={deleting}>
+              {deleting ? 'Deleting…' : 'Yes, delete'}
+            </button>
+            <button type="button" className="secondary-button" onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+              Keep employee
+            </button>
+          </div>
+        </div>
+      ) : null}
     </form>
   )
 }

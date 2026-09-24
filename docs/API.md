@@ -191,6 +191,14 @@ Updates an existing employee's profile and configuration fields.
   - `409 Conflict`: If the email is changed to an email already in use by another employee.
   - `422 Unprocessable Entity`: Invalid payload or empty `name`.
 
+#### `DELETE /employees/{employee_id}`
+Permanently deletes an employee together with their configuration, activity logs, daily scores and stored reports.
+
+- **Authentication**: None
+- **Responses**:
+  - `204 No Content`: Employee and related data deleted.
+  - `404 Not Found`: If `employee_id` does not exist.
+
 ---
 
 ### 4. Configuration Management
@@ -305,3 +313,30 @@ Generates and serves a formatted PDF document containing the employee's producti
   - `404 Not Found`: If `employee_id` does not exist.
   - `422 Unprocessable Entity`: If `period` parameter is invalid.
   - `500 Internal Server Error`: If no PDF generation backend (WeasyPrint / ReportLab) is available.
+
+#### `GET /team/summary`
+Returns the report summary for every employee in one call. Used by the dashboard's team overview.
+
+- **Authentication**: None
+- **Query Parameters**:
+  - `period` *(optional, default: `daily`)*: One of `daily`, `weekly`, `monthly`.
+- **Responses**:
+  - `200 OK`: Array ordered by employee ID. Each item has `id`, `name`, `role` plus every field returned by `GET /reports/{employee_id}`.
+  - `422 Unprocessable Entity`: If `period` parameter is invalid.
+
+```json
+[
+  {
+    "id": 1,
+    "name": "Alex Rivers",
+    "role": "Lead Software Engineer",
+    "employee_id": 1,
+    "period": "weekly",
+    "average_score": 0.62,
+    "total_productive_hours": 1.4,
+    "total_idle_minutes": 30,
+    "event_summary": {"app_focus": 14, "browser_tab": 6, "idle_start": 2, "login": 3, "outlook_activity": 0},
+    "app_weights": {"VS Code": "high"}
+  }
+]
+```

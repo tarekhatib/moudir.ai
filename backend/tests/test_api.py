@@ -289,3 +289,54 @@ def test_pdf_export(client):
     assert pdf_res.status_code == 200
     assert pdf_res.headers["content-type"] == "application/pdf"
     assert pdf_res.content.startswith(b"%PDF")
+
+
+def test_delete_employee_removes_related_data(client, db_session):
+    from app import models
+
+    emp_id = client.post("/employees", json={"name": "To Delete", "email": "gone@example.com"}).json()["id"]
+    client.post(
+        "/ingest",
+        json={"events": [{"employee_id": emp_id, "event_type": "login", "timestamp": datetime.now(timezone.utc).isoformat(), "detail": {}}]},
+        headers={"X-Agent-Token": "test-secret-token"},
+    )
+
+    delete_res = client.delete(f"/employees/{emp_id}")
+    assert delete_res.status_code == 204
+
+    assert client.get(f"/employees/{emp_id}").status_code == 404
+    assert client.get("/employees").json() == []
+    assert db_session.query(models.ActivityLog).filter_by(employee_id=emp_id).count() == 0
+    assert db_session.query(models.Config).filter_by(employee_id=emp_id).count() == 0
+
+    # Email is free to reuse after deletion
+    assert client.post("/employees", json={"name": "New Person", "email": "gone@example.com"}).status_code == 200
+
+    # Deleting again is a 404
+    assert client.delete(f"/employees/{emp_id}").status_code == 404
+
+
+def test_team_summary(client):
+    first = client.post("/employees", json={"name": "First", "role": "Engineer"}).json()["id"]
+    second = client.post("/employees", json={"name": "Second"}).json()["id"]
+    now_iso = datetime.now(timezone.utc).isoformat()
+    client.post(
+        "/ingest",
+        json={"events": [
+            {"employee_id": first, "event_type": "login", "timestamp": now_iso, "detail": {}},
+            {"employee_id": first, "event_type": "app_focus", "timestamp": now_iso, "detail": {"app_name": "Code"}},
+        ]},
+        headers={"X-Agent-Token": "test-secret-token"},
+    )
+
+    res = client.get("/team/summary?period=weekly")
+    assert res.status_code == 200
+    rows = res.json()
+    assert [row["id"] for row in rows] == [first, second]
+    assert rows[0]["name"] == "First"
+    assert rows[0]["role"] == "Engineer"
+    assert rows[0]["period"] == "weekly"
+    assert rows[0]["event_summary"]["app_focus"] == 1
+    assert rows[1]["event_summary"]["login"] == 0
+
+    assert client.get("/team/summary?period=yearly").status_code == 422

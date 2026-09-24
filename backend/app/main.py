@@ -286,6 +286,16 @@ def update_employee(employee_id: int, payload: EmployeeProfilePayload, db: Sessi
     }
 
 
+@app.delete("/employees/{employee_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_employee(employee_id: int, db: Session = Depends(get_db)):
+    """Delete an employee together with their config, activity logs, scores and reports."""
+    employee = _get_employee(employee_id, db)
+    for model in (models.ActivityLog, models.Config, models.DailyScore, models.Report):
+        db.query(model).filter(model.employee_id == employee_id).delete(synchronize_session=False)
+    db.delete(employee)
+    db.commit()
+
+
 @app.get("/config/{employee_id}")
 def get_config(employee_id: int, db: Session = Depends(get_db)):
     _get_employee(employee_id, db)
@@ -416,6 +426,27 @@ def get_reports(
     db: Session = Depends(get_db),
 ):
     return _score_logs_for_period(employee_id, db, period)
+
+
+@app.get("/team/summary")
+def get_team_summary(
+    period: str = Query("daily", pattern="^(daily|weekly|monthly)$"),
+    db: Session = Depends(get_db),
+):
+    """Report summary for every employee, used by the dashboard team overview."""
+    employees = db.query(models.Employee).order_by(models.Employee.id.asc()).all()
+    rows = []
+    for employee in employees:
+        summary = _score_logs_for_period(employee.id, db, period)
+        rows.append(
+            {
+                "id": employee.id,
+                "name": employee.name,
+                "role": employee.role,
+                **summary,
+            }
+        )
+    return rows
 
 
 @app.get("/reports/{employee_id}/pdf")

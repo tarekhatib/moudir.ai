@@ -59,3 +59,10 @@ export type EmployeeConfig = {
   min_productive_hours: number
   max_idle_minutes: number
 }
+
+// One row of GET /team/summary: the employee plus their report for the period.
+export type TeamRow = Summary & {
+  id: number
+  name: string
+  role: string | null
+}
