@@ -64,8 +64,71 @@
   color: #312e81;
 }
 
+.primary-button:disabled,
+.secondary-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.link-button {
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.form-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+
+.field-error {
+  color: #b42318;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+input[aria-invalid='true'] {
+  border-color: #f04438;
+}
+
+.employee-role {
+  display: block;
+  color: #667085;
+  font-weight: 400;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.stat-hint {
+  display: block;
+  margin-top: 8px;
+  font-size: 0.75rem;
+  color: #98a2b3;
+}
+
+.weight-value {
+  text-transform: capitalize;
+}
+
 .toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
   margin-bottom: 24px;
+}
+
+.period-range {
+  font-size: 0.9rem;
 }
 
 .segmented-control {
@@ -253,6 +316,32 @@ textarea {
   background: #f9fafb;
   color: #344054;
   border: 1px solid #e5e7eb;
+}
+
+.success-box {
+  margin-bottom: 16px;
+  border-radius: 14px;
+  padding: 14px 16px;
+  background: #ecfdf3;
+  border: 1px solid #abefc6;
+  color: #067647;
+}
+
+.notice {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 16px;
+}
+
+.notice-close {
+  border: none;
+  background: none;
+  font-size: 1.3rem;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
 }
 
 .error-box {
