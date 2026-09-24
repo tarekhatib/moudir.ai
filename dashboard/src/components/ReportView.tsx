@@ -1,5 +1,6 @@
 import type { Summary } from '../types'
-import { formatWeight, scoreTone } from '../utils/format'
+import { scoreTone } from '../utils/format'
+import { TopAppsChart } from './charts/TopAppsChart'
 
 type Props = {
   summary: Summary
@@ -7,7 +8,6 @@ type Props = {
 
 export function ReportView({ summary }: Props) {
   const percent = Math.round(summary.average_score * 100)
-  const weights = Object.entries(summary.app_weights ?? {})
 
   return (
     <>
@@ -43,19 +43,8 @@ export function ReportView({ summary }: Props) {
         </article>
 
         <article className="panel">
-          <h2>App weighting</h2>
-          {weights.length === 0 ? (
-            <p className="muted">No app weights configured yet.</p>
-          ) : (
-            <ul className="metric-list">
-              {weights.map(([name, value]) => (
-                <li key={name}>
-                  <span>{name}</span>
-                  <strong className="weight-value">{formatWeight(value)}</strong>
-                </li>
-              ))}
-            </ul>
-          )}
+          <h2>Most used applications</h2>
+          <TopAppsChart apps={summary.top_apps ?? []} weights={summary.app_weights ?? {}} />
         </article>
       </section>
     </>

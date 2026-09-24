@@ -350,8 +350,7 @@ def save_config(
     }
 
 
-def _score_logs_for_period(employee_id: int, db: Session, period: str):
-    _get_employee(employee_id, db)
+def _period_bounds(period: str) -> tuple[datetime, datetime]:
     today = datetime.utcnow().date()
     if period == "daily":
         start = datetime.combine(today, datetime.min.time())
@@ -367,8 +366,11 @@ def _score_logs_for_period(employee_id: int, db: Session, period: str):
             end = datetime(start.year, start.month + 1, 1)
     else:
         raise HTTPException(status_code=400, detail="period must be daily, weekly, or monthly")
+    return start, end
 
-    logs = (
+
+def _query_logs(employee_id: int, db: Session, start: datetime, end: datetime):
+    return (
         db.query(models.ActivityLog)
         .filter(
             models.ActivityLog.employee_id == employee_id,
@@ -378,10 +380,16 @@ def _score_logs_for_period(employee_id: int, db: Session, period: str):
         .all()
     )
 
+
+def _get_config_weights(employee_id: int, db: Session) -> tuple[dict, dict]:
     config = db.query(models.Config).filter(models.Config.employee_id == employee_id).first()
     category_weights = (config.category_weights or {}) if config else {}
     app_weights = (config.software_weights or {}) if config else {}
+    return category_weights, app_weights
 
+
+def _summarize_logs(logs, category_weights: dict) -> dict:
+    """Score a set of activity logs. See docs/SCORING.md for the formulas."""
     app_focus_count = sum(1 for log in logs if log.event_type == "app_focus")
     browser_count = sum(1 for log in logs if log.event_type == "browser_tab")
     idle_events = sum(1 for log in logs if log.event_type == "idle_start")
@@ -400,22 +408,43 @@ def _score_logs_for_period(employee_id: int, db: Session, period: str):
     )
     weighted_total = max(0.0, min(1.0, weighted_total))
 
-    event_summary = {
-        "app_focus": app_focus_count,
-        "browser_tab": browser_count,
-        "idle_start": idle_events,
-        "login": login_count,
-        "outlook_activity": sum(1 for log in logs if log.event_type == "outlook_activity"),
+    return {
+        "average_score": weighted_total,
+        "total_productive_hours": round(app_focus_count * 0.1, 2),
+        "total_idle_minutes": idle_events * 15,
+        "event_summary": {
+            "app_focus": app_focus_count,
+            "browser_tab": browser_count,
+            "idle_start": idle_events,
+            "login": login_count,
+            "outlook_activity": sum(1 for log in logs if log.event_type == "outlook_activity"),
+        },
     }
+
+
+def _top_apps(logs, limit: int = 8) -> list[dict]:
+    counts: dict[str, int] = {}
+    for log in logs:
+        if log.event_type != "app_focus":
+            continue
+        name = ((log.detail or {}).get("app_name") or "").strip() or "Unknown"
+        counts[name] = counts.get(name, 0) + 1
+    ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0].lower()))
+    return [{"app_name": name, "focus_events": count} for name, count in ranked[:limit]]
+
+
+def _score_logs_for_period(employee_id: int, db: Session, period: str):
+    _get_employee(employee_id, db)
+    start, end = _period_bounds(period)
+    logs = _query_logs(employee_id, db, start, end)
+    category_weights, app_weights = _get_config_weights(employee_id, db)
 
     return {
         "employee_id": employee_id,
         "period": period,
-        "average_score": weighted_total,
-        "total_productive_hours": round(app_focus_count * 0.1, 2),
-        "total_idle_minutes": idle_events * 15,
-        "event_summary": event_summary,
+        **_summarize_logs(logs, category_weights),
         "app_weights": app_weights,
+        "top_apps": _top_apps(logs),
     }
 
 
@@ -426,6 +455,38 @@ def get_reports(
     db: Session = Depends(get_db),
 ):
     return _score_logs_for_period(employee_id, db, period)
+
+
+@app.get("/reports/{employee_id}/trend")
+def get_report_trend(
+    employee_id: int,
+    days: int = Query(14, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
+    """Per-day scores for the last `days` days (UTC), oldest first, including days with no activity."""
+    _get_employee(employee_id, db)
+    today = datetime.combine(datetime.utcnow().date(), datetime.min.time())
+    start = today - timedelta(days=days - 1)
+    end = today + timedelta(days=1)
+    logs = _query_logs(employee_id, db, start, end)
+    category_weights, _ = _get_config_weights(employee_id, db)
+
+    logs_by_day: dict = {}
+    for log in logs:
+        logs_by_day.setdefault(log.timestamp.date(), []).append(log)
+
+    points = []
+    for offset in range(days):
+        day = (start + timedelta(days=offset)).date()
+        day_logs = logs_by_day.get(day, [])
+        points.append(
+            {
+                "date": day.isoformat(),
+                "has_activity": bool(day_logs),
+                **_summarize_logs(day_logs, category_weights),
+            }
+        )
+    return {"employee_id": employee_id, "days": days, "points": points}
 
 
 @app.get("/team/summary")

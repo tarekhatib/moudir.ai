@@ -294,11 +294,43 @@ Computes productivity score and event summaries over a specified time window.
       },
       "app_weights": {
         "VS Code": "high"
-      }
+      },
+      "top_apps": [
+        {"app_name": "VS Code", "focus_events": 30},
+        {"app_name": "Slack", "focus_events": 15}
+      ]
+    }
+    ```
+    `top_apps` lists up to 8 applications by number of `app_focus` events in the period, most used first.
+  - `404 Not Found`: If `employee_id` does not exist.
+  - `422 Unprocessable Entity`: If `period` is not one of `daily`, `weekly`, `monthly`.
+
+#### `GET /reports/{employee_id}/trend`
+Per-day scores for the most recent days (UTC), oldest first. Days with no events are included with `has_activity: false` so charts can show gaps.
+
+- **Authentication**: None
+- **Query Parameters**:
+  - `days` *(optional, default: `14`)*: Number of days to return, 1–90, ending today.
+- **Responses**:
+  - `200 OK`:
+    ```json
+    {
+      "employee_id": 1,
+      "days": 14,
+      "points": [
+        {
+          "date": "2026-09-11",
+          "has_activity": true,
+          "average_score": 0.72,
+          "total_productive_hours": 2.1,
+          "total_idle_minutes": 15,
+          "event_summary": {"app_focus": 21, "browser_tab": 9, "idle_start": 1, "login": 1, "outlook_activity": 0}
+        }
+      ]
     }
     ```
   - `404 Not Found`: If `employee_id` does not exist.
-  - `422 Unprocessable Entity`: If `period` is not one of `daily`, `weekly`, `monthly`.
+  - `422 Unprocessable Entity`: If `days` is outside 1–90.
 
 ---
 

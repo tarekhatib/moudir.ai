@@ -8,6 +8,7 @@ import { Notice, type NoticeMessage } from './components/Notice'
 import { PeriodSelector } from './components/PeriodSelector'
 import { ReportView } from './components/ReportView'
 import { TeamOverview } from './components/TeamOverview'
+import { TrendPanel } from './components/TrendPanel'
 import type { Employee, EmployeeInput, Period, Summary } from './types'
 import { describePeriod } from './utils/period'
 
@@ -280,6 +281,8 @@ function App() {
               ) : (
                 <ReportView summary={summary} />
               )}
+
+              <TrendPanel employeeId={selectedId} refreshKey={reportVersion} />
             </>
           ) : null}
         </>

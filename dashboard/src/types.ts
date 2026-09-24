@@ -36,6 +36,28 @@ export type Summary = {
   event_summary: EventSummary
   // Values are either a level ("high" | "medium" | "low") or a numeric weight.
   app_weights: Record<string, string | number>
+  // Most-focused applications in the period (added with the trend endpoint; optional for older backends).
+  top_apps?: TopApp[]
+}
+
+export type TopApp = {
+  app_name: string
+  focus_events: number
+}
+
+export type TrendPoint = {
+  date: string // YYYY-MM-DD (UTC)
+  has_activity: boolean
+  average_score: number
+  total_productive_hours: number
+  total_idle_minutes: number
+  event_summary: EventSummary
+}
+
+export type Trend = {
+  employee_id: number
+  days: number
+  points: TrendPoint[]
 }
 
 export type WeightLevel = 'high' | 'medium' | 'low'

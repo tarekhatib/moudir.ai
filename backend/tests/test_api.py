@@ -340,3 +340,54 @@ def test_team_summary(client):
     assert rows[1]["event_summary"]["login"] == 0
 
     assert client.get("/team/summary?period=yearly").status_code == 422
+
+
+def test_report_includes_top_apps(client):
+    emp_id = client.post("/employees", json={"name": "App User"}).json()["id"]
+    now_iso = datetime.now(timezone.utc).isoformat()
+    events = [
+        {"employee_id": emp_id, "event_type": "app_focus", "timestamp": now_iso, "detail": {"app_name": name}}
+        for name in ["VS Code", "Slack", "VS Code", "VS Code", "Slack", "Figma"]
+    ]
+    client.post("/ingest", json={"events": events}, headers={"X-Agent-Token": "test-secret-token"})
+
+    top_apps = client.get(f"/reports/{emp_id}?period=daily").json()["top_apps"]
+    assert top_apps == [
+        {"app_name": "VS Code", "focus_events": 3},
+        {"app_name": "Slack", "focus_events": 2},
+        {"app_name": "Figma", "focus_events": 1},
+    ]
+
+
+def test_report_trend(client):
+    from datetime import timedelta
+
+    emp_id = client.post("/employees", json={"name": "Trend Subject"}).json()["id"]
+    now = datetime.now(timezone.utc)
+    two_days_ago = (now - timedelta(days=2)).isoformat()
+    client.post(
+        "/ingest",
+        json={"events": [
+            {"employee_id": emp_id, "event_type": "login", "timestamp": now.isoformat(), "detail": {}},
+            {"employee_id": emp_id, "event_type": "app_focus", "timestamp": two_days_ago, "detail": {"app_name": "Code"}},
+            {"employee_id": emp_id, "event_type": "app_focus", "timestamp": two_days_ago, "detail": {"app_name": "Code"}},
+        ]},
+        headers={"X-Agent-Token": "test-secret-token"},
+    )
+
+    res = client.get(f"/reports/{emp_id}/trend?days=7")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["days"] == 7
+    points = body["points"]
+    assert len(points) == 7
+    # Oldest first, ending today (UTC)
+    assert points[-1]["date"] == now.date().isoformat()
+    assert points[-1]["event_summary"]["login"] == 1
+    assert points[-3]["event_summary"]["app_focus"] == 2
+    assert points[-3]["has_activity"] is True
+    assert points[0]["has_activity"] is False
+
+    assert client.get(f"/reports/{emp_id}/trend?days=0").status_code == 422
+    assert client.get(f"/reports/{emp_id}/trend?days=91").status_code == 422
+    assert client.get("/reports/99999/trend").status_code == 404
