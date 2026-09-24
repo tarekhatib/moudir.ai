@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import './App.css'
 import { apiDownload, apiGet, apiPost, apiPut, errorMessage, isAbort } from './api/client'
+import { ConfigPanel } from './components/ConfigPanel'
 import { EmployeeForm } from './components/EmployeeForm'
 import { EmployeeList } from './components/EmployeeList'
 import { Notice, type NoticeMessage } from './components/Notice'
@@ -10,6 +11,7 @@ import type { Employee, EmployeeInput, Period, Summary } from './types'
 import { describePeriod } from './utils/period'
 
 type Status = 'loading' | 'ready' | 'error'
+type Tab = 'report' | 'settings'
 
 function App() {
   const [period, setPeriod] = useState<Period>('daily')
@@ -24,6 +26,9 @@ function App() {
   const [summaryStatus, setSummaryStatus] = useState<Status>('loading')
   const [summaryError, setSummaryError] = useState<string | null>(null)
   const [notice, setNotice] = useState<NoticeMessage | null>(null)
+  const [tab, setTab] = useState<Tab>('report')
+  // Bumped after settings are saved so the report re-fetches with the new weights.
+  const [reportVersion, setReportVersion] = useState(0)
 
   const dismissNotice = useCallback(() => setNotice(null), [])
   const selectedEmployee = employees.find((employee) => employee.id === selectedId) ?? null
@@ -55,7 +60,7 @@ function App() {
 
   // One place that loads the report, so changing period or employee fetches exactly once.
   useEffect(() => {
-    if (selectedId === null || creating) {
+    if (selectedId === null || creating || tab !== 'report') {
       setSummary(null)
       return
     }
@@ -74,7 +79,7 @@ function App() {
         setSummaryError(errorMessage(error))
       })
     return () => controller.abort()
-  }, [selectedId, period, creating])
+  }, [selectedId, period, creating, tab, reportVersion])
 
   const handleSelect = (id: number) => {
     setCreating(false)
@@ -174,7 +179,34 @@ function App() {
         )}
       </section>
 
-      {selectedId !== null && !creating ? (
+      {selectedEmployee && !creating ? (
+        <nav className="tabs" aria-label="Employee sections">
+          {(['report', 'settings'] as Tab[]).map((item) => (
+            <button
+              key={item}
+              type="button"
+              className={tab === item ? 'tab active' : 'tab'}
+              aria-current={tab === item ? 'page' : undefined}
+              onClick={() => setTab(item)}
+            >
+              {item === 'report' ? 'Report' : 'Settings'}
+            </button>
+          ))}
+        </nav>
+      ) : null}
+
+      {selectedEmployee && !creating && tab === 'settings' ? (
+        <ConfigPanel
+          employee={selectedEmployee}
+          onSaved={() => {
+            setReportVersion((version) => version + 1)
+            setNotice({ kind: 'success', text: 'Settings saved.' })
+          }}
+          onError={(message) => setNotice({ kind: 'error', text: `Could not save settings: ${message}` })}
+        />
+      ) : null}
+
+      {selectedId !== null && !creating && tab === 'report' ? (
         <>
           <section className="toolbar">
             <PeriodSelector value={period} onChange={setPeriod} />

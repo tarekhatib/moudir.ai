@@ -37,3 +37,25 @@ export type Summary = {
   // Values are either a level ("high" | "medium" | "low") or a numeric weight.
   app_weights: Record<string, string | number>
 }
+
+export type WeightLevel = 'high' | 'medium' | 'low'
+
+export const CATEGORY_KEYS = ['app_usage', 'browser', 'punctuality', 'idle'] as const
+export type CategoryKey = (typeof CATEGORY_KEYS)[number]
+
+export const DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
+export type DayKey = (typeof DAY_KEYS)[number]
+
+// [start, end] as "HH:MM"
+export type TimeRange = [string, string]
+
+export type EmployeeConfig = {
+  employee_id: number
+  job_description: string | null
+  role_tag: string | null
+  software_weights: Record<string, WeightLevel>
+  category_weights: Partial<Record<CategoryKey, number>>
+  schedule: Partial<Record<DayKey, TimeRange[]>>
+  min_productive_hours: number
+  max_idle_minutes: number
+}
