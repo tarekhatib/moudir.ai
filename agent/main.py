@@ -1,4 +1,3 @@
-#test
 """
 Moudir.ai — Windows Tracking Agent.
 
@@ -14,6 +13,8 @@ Day 3-7 scope:
   - Backend sync
   - Browser tab capture
   - Outlook activity capture
+
+Configure with BACKEND_URL and AGENT_TOKEN (generated per employee in the dashboard).
 """
 
 import json
@@ -57,16 +58,14 @@ load_dotenv()
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 AGENT_TOKEN = os.getenv("AGENT_TOKEN")
-EMPLOYEE_ID = int(os.getenv("EMPLOYEE_ID", "1"))
 SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "60"))
 POLL_INTERVAL_SECONDS = 2
 IDLE_THRESHOLD_SECONDS = 60
+SYNC_BATCH_SIZE = 500
 
 BASE_DIR = Path(__file__).resolve().parent
 QUEUE_DB_PATH = BASE_DIR / "data" / "agent_queue.db"
 QUEUE_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-event_buffer = []
 
 
 def init_queue_db():
@@ -87,13 +86,10 @@ def init_queue_db():
 def log_event(event_type: str, detail: dict = None) -> dict:
     """Create and buffer an event."""
     event = {
-        "employee_id": EMPLOYEE_ID,
         "event_type": event_type,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "detail": detail or {},
     }
-    event_buffer.append(event)
-
     connection = sqlite3.connect(QUEUE_DB_PATH)
     connection.execute(
         "INSERT INTO queue (payload, created_at) VALUES (?, ?)",
@@ -163,80 +159,54 @@ def maybe_emit_outlook_event(app_name: str):
 
 
 def sync_buffer_to_backend():
-    """Send all queued events to the backend as a single batch."""
+    """Send queued events to the backend in batches, deleting each batch once it's accepted.
+
+    The agent token identifies the employee, so events carry no employee ID.
+    """
     if requests is None:
         print("Sync skipped: requests is not installed in the active environment.")
         return
-
-    connection = sqlite3.connect(QUEUE_DB_PATH)
-    rows = connection.execute(
-        "SELECT payload FROM queue ORDER BY id ASC"
-    ).fetchall()
-    connection.close()
-
-    if not rows:
+    if not AGENT_TOKEN:
+        print("Sync skipped: AGENT_TOKEN is not set. Generate one in the dashboard.")
         return
 
-    events = [json.loads(row[0]) for row in rows]
-    payload = {"events": events}
-
-    try:
-        response = requests.post(
-            f"{BACKEND_URL}/ingest",
-            json=payload,
-            headers={"X-Agent-Token": AGENT_TOKEN or ""},
-            timeout=10,
-        )
-        if response.status_code == 200:
-            connection = sqlite3.connect(QUEUE_DB_PATH)
-            connection.execute("DELETE FROM queue")
-            connection.commit()
-            connection.close()
-            print(f"Synced {len(events)} event(s) to backend.")
-        else:
-            print(f"Sync failed: {response.status_code} — {response.text}")
-    except Exception as exc:
-        print(f"Sync error: {exc}")
-
-
-def poll_active_window():
-    """Emit app_focus, browser, and idle events while the agent runs."""
-    last_app = None
-    last_title = None
-    idle_started = False
-    idle_start_ts = None
-
-    print(f"Starting active window polling (interval: {POLL_INTERVAL_SECONDS}s)...")
-
+    total = 0
     while True:
-        app_name, window_title = get_active_window()
+        connection = sqlite3.connect(QUEUE_DB_PATH)
+        rows = connection.execute(
+            "SELECT id, payload FROM queue ORDER BY id ASC LIMIT ?", (SYNC_BATCH_SIZE,)
+        ).fetchall()
+        connection.close()
+        if not rows:
+            break
 
-        if app_name and (app_name != last_app or window_title != last_title):
-            log_event(
-                "app_focus",
-                {"app_name": app_name, "window_title": window_title or ""},
+        try:
+            response = requests.post(
+                f"{BACKEND_URL}/ingest",
+                json={"events": [json.loads(payload) for _, payload in rows]},
+                headers={"X-Agent-Token": AGENT_TOKEN},
+                timeout=10,
             )
-            last_app = app_name
-            last_title = window_title
+        except Exception as exc:
+            print(f"Sync error: {exc}")
+            break
 
-            maybe_emit_browser_event(app_name, window_title)
-            maybe_emit_outlook_event(app_name)
+        if response.status_code == 401:
+            print("Sync failed: the agent token was rejected. Generate a new one in the dashboard.")
+            break
+        if response.status_code != 200:
+            print(f"Sync failed: {response.status_code} — {response.text}")
+            break
 
-        if WINDOWS_AVAILABLE:
-            idle_seconds = get_idle_seconds()
-            if idle_seconds >= IDLE_THRESHOLD_SECONDS and not idle_started:
-                log_event("idle_start", {})
-                idle_started = True
-                idle_start_ts = datetime.now(timezone.utc)
-            elif idle_seconds < IDLE_THRESHOLD_SECONDS and idle_started and idle_start_ts:
-                duration_seconds = int(
-                    (datetime.now(timezone.utc) - idle_start_ts).total_seconds()
-                )
-                log_event("idle_end", {"duration_seconds": duration_seconds})
-                idle_started = False
-                idle_start_ts = None
+        # Only delete what was sent; events logged during the upload stay queued.
+        connection = sqlite3.connect(QUEUE_DB_PATH)
+        connection.execute("DELETE FROM queue WHERE id <= ?", (rows[-1][0],))
+        connection.commit()
+        connection.close()
+        total += len(rows)
 
-        time.sleep(POLL_INTERVAL_SECONDS)
+    if total:
+        print(f"Synced {total} event(s) to backend.")
 
 
 def main_loop():
@@ -245,36 +215,41 @@ def main_loop():
     print(f"\n{'='*60}")
     print("Moudir.ai Agent Starting")
     print(f"  Backend: {BACKEND_URL}")
-    print(f"  Employee ID: {EMPLOYEE_ID}")
     print(f"  Polling interval: {POLL_INTERVAL_SECONDS}s")
     print(f"  Sync interval: {SYNC_INTERVAL_SECONDS}s")
     print(f"{'='*60}\n")
 
     last_sync = time.time()
+    last_app = None
+    last_title = None
+    idle_start_ts = None
     log_event("login", {})
 
     try:
         while True:
             app_name, window_title = get_active_window()
-            if app_name and (app_name != "finder" or window_title != "Macintosh HD"):
+            if app_name and (app_name != last_app or window_title != last_title):
                 log_event(
                     "app_focus",
                     {"app_name": app_name, "window_title": window_title or ""},
                 )
                 maybe_emit_browser_event(app_name, window_title)
                 maybe_emit_outlook_event(app_name)
+                last_app = app_name
+                last_title = window_title
 
             if WINDOWS_AVAILABLE:
                 idle_seconds = get_idle_seconds()
-                if idle_seconds >= IDLE_THRESHOLD_SECONDS:
+                if idle_seconds >= IDLE_THRESHOLD_SECONDS and idle_start_ts is None:
                     log_event("idle_start", {})
-                    while True:
-                        time.sleep(POLL_INTERVAL_SECONDS)
-                        idle_seconds = get_idle_seconds()
-                        if idle_seconds < IDLE_THRESHOLD_SECONDS:
-                            log_event("idle_end", {"duration_seconds": int(idle_seconds)})
-                            break
-                
+                    idle_start_ts = datetime.now(timezone.utc)
+                elif idle_seconds < IDLE_THRESHOLD_SECONDS and idle_start_ts is not None:
+                    duration_seconds = int(
+                        (datetime.now(timezone.utc) - idle_start_ts).total_seconds()
+                    )
+                    log_event("idle_end", {"duration_seconds": duration_seconds})
+                    idle_start_ts = None
+
             if time.time() - last_sync >= SYNC_INTERVAL_SECONDS:
                 sync_buffer_to_backend()
                 last_sync = time.time()
@@ -284,14 +259,6 @@ def main_loop():
         print("\n\nAgent shutting down...")
         log_event("logout", {})
         sync_buffer_to_backend()
-
-        print(f"\n{'='*60}")
-        print(f"Buffered events ({len(event_buffer)} total):")
-        print(f"{'='*60}")
-        for i, event in enumerate(event_buffer, 1):
-            print(f"{i}. {json.dumps(event, indent=2)}")
-        print(f"{'='*60}\n")
-
         sys.exit(0)
 
 

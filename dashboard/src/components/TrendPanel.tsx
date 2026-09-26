@@ -72,7 +72,7 @@ export function TrendPanel({ employeeId, refreshKey }: Props) {
             <TrendChart
               title="Daily productivity score"
               kind="line"
-              points={pointsFor(trend, (point) => Math.round(point.average_score * 100), true)}
+              points={pointsFor(trend, (point) => Math.round((point.average_score ?? 0) * 100), true)}
               max={100}
               format={(value) => `${Math.round(value)}%`}
               valueLabel="Score"

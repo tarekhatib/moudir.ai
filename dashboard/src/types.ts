@@ -9,6 +9,8 @@ export type Employee = {
   email: string | null
   job_description: string | null
   role_tag: string | null
+  // ISO timestamp of the current desktop-agent token, or null when none has been issued.
+  agent_token_created_at: string | null
 }
 
 export type EmployeeInput = {
@@ -30,14 +32,18 @@ export type EventSummary = {
 export type Summary = {
   employee_id: number
   period: Period
-  average_score: number
+  period_start: string // YYYY-MM-DD (UTC)
+  period_end: string
+  // Average of the daily scores on days with activity; null when there was no activity.
+  average_score: number | null
+  days_active: number
   total_productive_hours: number
   total_idle_minutes: number
   event_summary: EventSummary
   // Values are either a level ("high" | "medium" | "low") or a numeric weight.
   app_weights: Record<string, string | number>
-  // Most-focused applications in the period (added with the trend endpoint; optional for older backends).
-  top_apps?: TopApp[]
+  // Most-focused applications in the period, most used first.
+  top_apps: TopApp[]
 }
 
 export type TopApp = {
@@ -48,7 +54,7 @@ export type TopApp = {
 export type TrendPoint = {
   date: string // YYYY-MM-DD (UTC)
   has_activity: boolean
-  average_score: number
+  average_score: number | null
   total_productive_hours: number
   total_idle_minutes: number
   event_summary: EventSummary
@@ -87,4 +93,18 @@ export type TeamRow = Summary & {
   id: number
   name: string
   role: string | null
+}
+
+export type Role = 'owner' | 'manager'
+
+export type User = {
+  id: number
+  name: string
+  email: string
+  role: Role
+}
+
+export type Me = {
+  user: User
+  organization: { id: number; name: string }
 }

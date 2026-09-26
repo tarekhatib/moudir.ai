@@ -1,374 +1,158 @@
-# Moudir.ai Backend API Reference
+# Moudir.ai API Reference
 
-This document provides a comprehensive technical specification for the Moudir.ai REST API endpoints exposed by the FastAPI backend (`backend/`).
+The FastAPI backend in [`backend/`](../backend). In production it is served under
+`https://<your-domain>/api`; in development it runs on `http://localhost:8000` and the
+dashboard reaches it through the Vite proxy at `/api`. Paths below are relative to that base.
 
----
+- JSON in and out (except the PDF export).
+- Errors: `{"detail": "message"}`, or for validation errors (`422`) `{"detail": [{"msg": …}, …]}`.
+- All timestamps are UTC. Report periods and trend days use UTC day boundaries.
+- Interactive docs are at `/docs` in development (hidden in production).
 
-## Overview & Conventions
+## Authentication
 
-- **Base URL**: `http://localhost:8000` (configurable via `VITE_API_URL` on the frontend)
-- **Data Format**: `application/json` (unless requesting binary media like PDFs)
-- **Standard Error Format**:
-  ```json
-  {
-    "detail": "Error description or validation issues"
-  }
-  ```
-
----
-
-## Authentication & Authorization
-
-| Context | Header | Description |
+| Caller | How | Scope |
 | :--- | :--- | :--- |
-| **Agent Ingestion** | `X-Agent-Token: <token>` | Required on `POST /ingest`. Validated against `AGENT_TOKEN` environment variable. |
-| **Dashboard API** | None (Pilot stage) | All employee, config, and reporting endpoints operate in open pilot mode without user auth. |
+| **Dashboard (managers)** | `moudir_session` cookie set by `/auth/signup` or `/auth/login` (`HttpOnly`, `SameSite=Lax`, `Secure` in production) | Everything in the manager's organization |
+| **Desktop agent** | `X-Agent-Token: <token>` or `Authorization: Bearer <token>` | Writing events for the one employee the token was issued to |
 
----
+Without a valid session, dashboard endpoints return `401`. Employees and users of other
+organizations always return `404`, never `403`, so IDs from other tenants are not revealed.
 
-## Endpoint Specifications
+## Health
 
-### 1. Health Check
+`GET /health` → `200 {"status": "ok"}` when the database is reachable. No auth.
 
-#### `GET /health`
-Verifies backend connectivity and operational status.
+## Accounts
 
-- **Authentication**: None
-- **Request Body**: None
-- **Responses**:
-  - `200 OK`:
-    ```json
-    {
-      "status": "ok"
-    }
-    ```
+| Method & path | Body | Result |
+| :--- | :--- | :--- |
+| `POST /auth/signup` | `{organization_name, name, email, password}` (password ≥ 10 chars) | `201` + session cookie + `Me`. Creates an organization with the caller as **owner**. `409` if the email has an account, `403` if sign-up is disabled |
+| `POST /auth/login` | `{email, password}` | `200` + session cookie + `Me`. `401` on wrong credentials, `429` after too many failures |
+| `POST /auth/logout` | — | `204`; the session is deleted server-side |
+| `GET /auth/me` | — | `Me` |
+| `POST /auth/password` | `{current_password, new_password}` | `204`; signs out the user's other sessions. `400` if the current password is wrong |
 
----
+`Me` is `{"user": {"id", "name", "email", "role": "owner" | "manager"}, "organization": {"id", "name"}}`.
 
-### 2. Activity Ingestion
+### Manager accounts
 
-#### `POST /ingest`
-Ingests a batch of activity events logged by the desktop agent.
+| Method & path | Who | Result |
+| :--- | :--- | :--- |
+| `GET /organization/users` | any manager | List of users in the organization |
+| `POST /organization/users` | owner | Body `{name, email, password}` → `201` new manager. `409` if the email is taken |
+| `DELETE /organization/users/{id}` | owner | `204`. `400` for your own account |
 
-- **Authentication**: `X-Agent-Token` header required.
-- **Request Headers**:
-  - `Content-Type: application/json`
-  - `X-Agent-Token: <AGENT_TOKEN>`
-- **Request Body**:
-  ```json
-  {
-    "events": [
-      {
-        "employee_id": 1,
-        "event_type": "app_focus",
-        "timestamp": "2026-08-26T10:30:00Z",
-        "detail": {
-          "app_name": "VS Code",
-          "window_title": "main.py"
-        }
-      },
-      {
-        "employee_id": 1,
-        "event_type": "browser_tab",
-        "timestamp": "2026-08-26T10:35:00Z",
-        "detail": {
-          "tab_title": "FastAPI Documentation"
-        }
-      }
-    ]
-  }
-  ```
-- **Supported `event_type` values**:
-  - `login` — detail: `{}`
-  - `logout` — detail: `{}`
-  - `app_focus` — detail: `{"app_name": string, "window_title": string}`
-  - `idle_start` — detail: `{}`
-  - `idle_end` — detail: `{"duration_seconds": number}`
-  - `browser_tab` — detail: `{"tab_title": string}` *(no full URLs)*
-  - `outlook_activity` — detail: `{"activity_type": string}`
-- **Responses**:
-  - `200 OK`:
-    ```json
-    {
-      "status": "success",
-      "events_stored": 2
-    }
-    ```
-  - `401 Unauthorized`:
-    ```json
-    {
-      "detail": "Invalid or missing X-Agent-Token"
-    }
-    ```
-  - `422 Unprocessable Entity`: Validation failure on payload schema or event timestamp format.
+## Employees
 
----
-
-### 3. Employee Management
-
-#### `GET /employees`
-Returns a list of all registered employees with their associated job descriptions and role tags.
-
-- **Authentication**: None
-- **Responses**:
-  - `200 OK`:
-    ```json
-    [
-      {
-        "id": 1,
-        "name": "Jane Doe",
-        "role": "Software Engineer",
-        "email": "jane.doe@example.com",
-        "job_description": "Full stack web development",
-        "role_tag": "engineering"
-      }
-    ]
-    ```
-
----
-
-#### `POST /employees`
-Creates a new employee profile and initializes a default scoring configuration record.
-
-- **Authentication**: None
-- **Request Body**:
-  ```json
-  {
-    "name": "Jane Doe",
-    "role": "Software Engineer",
-    "email": "jane.doe@example.com",
-    "job_description": "Full stack web development",
-    "role_tag": "engineering"
-  }
-  ```
-  - `name` *(required, non-empty string)*: Stripped of leading/trailing whitespace.
-  - `role`, `email`, `job_description`, `role_tag` *(optional)*: Whitespace trimmed; empty strings stored as `null`.
-- **Responses**:
-  - `200 OK`: Returns the created employee record with assigned `id`.
-  - `409 Conflict`:
-    ```json
-    {
-      "detail": "An employee with this email already exists"
-    }
-    ```
-  - `422 Unprocessable Entity`: Empty or missing `name` field.
-
----
-
-#### `GET /employees/{employee_id}`
-Retrieves profile and config summary for a single employee.
-
-- **Authentication**: None
-- **Responses**:
-  - `200 OK`:
-    ```json
-    {
-      "id": 1,
-      "name": "Jane Doe",
-      "role": "Software Engineer",
-      "email": "jane.doe@example.com",
-      "job_description": "Full stack web development",
-      "role_tag": "engineering"
-    }
-    ```
-  - `404 Not Found`:
-    ```json
-    {
-      "detail": "Employee not found"
-    }
-    ```
-
----
-
-#### `PUT /employees/{employee_id}`
-Updates an existing employee's profile and configuration fields.
-
-- **Authentication**: None
-- **Request Body**: Same schema as `POST /employees`.
-- **Responses**:
-  - `200 OK`: Returns the updated employee record.
-  - `404 Not Found`: If `employee_id` does not exist.
-  - `409 Conflict`: If the email is changed to an email already in use by another employee.
-  - `422 Unprocessable Entity`: Invalid payload or empty `name`.
-
-#### `DELETE /employees/{employee_id}`
-Permanently deletes an employee together with their configuration, activity logs, daily scores and stored reports.
-
-- **Authentication**: None
-- **Responses**:
-  - `204 No Content`: Employee and related data deleted.
-  - `404 Not Found`: If `employee_id` does not exist.
-
----
-
-### 4. Configuration Management
-
-#### `GET /config/{employee_id}`
-Retrieves scoring parameters, software weights, category weights, and schedule for an employee.
-
-- **Authentication**: None
-- **Responses**:
-  - `200 OK`:
-    ```json
-    {
-      "employee_id": 1,
-      "job_description": "Full stack web development",
-      "role_tag": "engineering",
-      "software_weights": {
-        "VS Code": "high",
-        "Slack": "medium"
-      },
-      "category_weights": {
-        "app_usage": 0.4,
-        "browser": 0.2,
-        "punctuality": 0.2,
-        "idle": 0.2
-      },
-      "schedule": {
-        "mon": [["09:00", "13:00"], ["14:00", "18:00"]]
-      },
-      "min_productive_hours": 6.0,
-      "max_idle_minutes": 60
-    }
-    ```
-  - `404 Not Found`: If `employee_id` does not exist or config row is missing.
-
----
-
-#### `POST /config/{employee_id}`
-Updates scoring parameters, category weights, software weights, and schedule for an employee.
-
-- **Authentication**: None
-- **Request Body**:
-  ```json
-  {
-    "job_description": "Full stack web development",
-    "role_tag": "engineering",
-    "software_weights": {
-      "VS Code": "high",
-      "YouTube": "low"
-    },
-    "category_weights": {
-      "app_usage": 0.5,
-      "browser": 0.2,
-      "punctuality": 0.2,
-      "idle": 0.1
-    },
-    "schedule": {
-      "mon": [["09:00", "17:00"]]
-    },
-    "min_productive_hours": 7.0,
-    "max_idle_minutes": 45
-  }
-  ```
-- **Responses**:
-  - `200 OK`: Returns the updated configuration object.
-  - `404 Not Found`: If `employee_id` does not exist (prevents orphan config rows).
-  - `422 Unprocessable Entity`: Validation failure on payload structure.
-
----
-
-### 5. Reporting & Analytics
-
-#### `GET /reports/{employee_id}`
-Computes productivity score and event summaries over a specified time window.
-
-- **Authentication**: None
-- **Query Parameters**:
-  - `period` *(optional, default: `daily`)*: One of `daily`, `weekly`, `monthly`.
-- **Responses**:
-  - `200 OK`:
-    ```json
-    {
-      "employee_id": 1,
-      "period": "daily",
-      "average_score": 0.85,
-      "total_productive_hours": 4.5,
-      "total_idle_minutes": 30,
-      "event_summary": {
-        "app_focus": 45,
-        "browser_tab": 18,
-        "idle_start": 2,
-        "login": 1,
-        "outlook_activity": 0
-      },
-      "app_weights": {
-        "VS Code": "high"
-      },
-      "top_apps": [
-        {"app_name": "VS Code", "focus_events": 30},
-        {"app_name": "Slack", "focus_events": 15}
-      ]
-    }
-    ```
-    `top_apps` lists up to 8 applications by number of `app_focus` events in the period, most used first.
-  - `404 Not Found`: If `employee_id` does not exist.
-  - `422 Unprocessable Entity`: If `period` is not one of `daily`, `weekly`, `monthly`.
-
-#### `GET /reports/{employee_id}/trend`
-Per-day scores for the most recent days (UTC), oldest first. Days with no events are included with `has_activity: false` so charts can show gaps.
-
-- **Authentication**: None
-- **Query Parameters**:
-  - `days` *(optional, default: `14`)*: Number of days to return, 1–90, ending today.
-- **Responses**:
-  - `200 OK`:
-    ```json
-    {
-      "employee_id": 1,
-      "days": 14,
-      "points": [
-        {
-          "date": "2026-09-11",
-          "has_activity": true,
-          "average_score": 0.72,
-          "total_productive_hours": 2.1,
-          "total_idle_minutes": 15,
-          "event_summary": {"app_focus": 21, "browser_tab": 9, "idle_start": 1, "login": 1, "outlook_activity": 0}
-        }
-      ]
-    }
-    ```
-  - `404 Not Found`: If `employee_id` does not exist.
-  - `422 Unprocessable Entity`: If `days` is outside 1–90.
-
----
-
-#### `GET /reports/{employee_id}/pdf`
-Generates and serves a formatted PDF document containing the employee's productivity report.
-
-- **Authentication**: None
-- **Query Parameters**:
-  - `period` *(optional, default: `daily`)*: One of `daily`, `weekly`, `monthly`.
-- **Responses**:
-  - `200 OK`: Binary PDF file stream with `Content-Type: application/pdf` and `Content-Disposition: inline; filename="report_{id}_{period}.pdf"`.
-  - `404 Not Found`: If `employee_id` does not exist.
-  - `422 Unprocessable Entity`: If `period` parameter is invalid.
-  - `500 Internal Server Error`: If no PDF generation backend (WeasyPrint / ReportLab) is available.
-
-#### `GET /team/summary`
-Returns the report summary for every employee in one call. Used by the dashboard's team overview.
-
-- **Authentication**: None
-- **Query Parameters**:
-  - `period` *(optional, default: `daily`)*: One of `daily`, `weekly`, `monthly`.
-- **Responses**:
-  - `200 OK`: Array ordered by employee ID. Each item has `id`, `name`, `role` plus every field returned by `GET /reports/{employee_id}`.
-  - `422 Unprocessable Entity`: If `period` parameter is invalid.
+Employee object:
 
 ```json
-[
-  {
-    "id": 1,
-    "name": "Alex Rivers",
-    "role": "Lead Software Engineer",
-    "employee_id": 1,
-    "period": "weekly",
-    "average_score": 0.62,
-    "total_productive_hours": 1.4,
-    "total_idle_minutes": 30,
-    "event_summary": {"app_focus": 14, "browser_tab": 6, "idle_start": 2, "login": 3, "outlook_activity": 0},
-    "app_weights": {"VS Code": "high"}
-  }
-]
+{
+  "id": 1,
+  "name": "Jane Doe",
+  "role": "Software Engineer",
+  "email": "jane.doe@example.com",
+  "job_description": "Full stack web development",
+  "role_tag": "engineering",
+  "agent_token_created_at": "2026-09-26T08:30:00Z"
+}
 ```
+
+| Method & path | Result |
+| :--- | :--- |
+| `GET /employees` | Employees in your organization, by ID |
+| `POST /employees` | Body `{name, role?, email?, job_description?, role_tag?}` → `201`. Strings are trimmed; blanks become `null`; emails are lower-cased. `409` if the email is already used in your organization |
+| `GET /employees/{id}` | One employee |
+| `PUT /employees/{id}` | Same body as create |
+| `DELETE /employees/{id}` | `204`; also deletes their settings and all activity |
+| `POST /employees/{id}/agent-token` | `{"employee_id", "agent_token": "mdr_…", "created_at"}`. **The token is only returned here**; only its hash is stored. Issuing a new token invalidates the previous one |
+| `DELETE /employees/{id}/agent-token` | `204`; the agent can no longer send events |
+
+## Scoring settings
+
+`GET /config/{employee_id}` and `POST /config/{employee_id}` read and replace:
+
+```json
+{
+  "employee_id": 1,
+  "job_description": "Full stack web development",
+  "role_tag": "engineering",
+  "software_weights": {"VS Code": "high", "YouTube": "low"},
+  "category_weights": {"app_usage": 0.5, "browser": 0.2, "punctuality": 0.2, "idle": 0.1},
+  "schedule": {"mon": [["09:00", "13:00"], ["14:00", "18:00"]]},
+  "min_productive_hours": 6.0,
+  "max_idle_minutes": 60
+}
+```
+
+Validation (`422` otherwise): software weights are `high|medium|low` with unique names;
+category weights use only the four keys shown, each 0–1, summing to 1; schedule days are
+`mon`–`sun` with `HH:MM` ranges that don't overlap; `min_productive_hours` 0–24;
+`max_idle_minutes` 0–1440.
+
+## Reports
+
+`period` is `daily`, `weekly` (Monday–Sunday) or `monthly`, for the current UTC day/week/month.
+
+### `GET /reports/{employee_id}?period=daily`
+
+```json
+{
+  "employee_id": 1,
+  "period": "weekly",
+  "period_start": "2026-09-21",
+  "period_end": "2026-09-27",
+  "average_score": 0.86,
+  "days_active": 5,
+  "total_productive_hours": 27.4,
+  "total_idle_minutes": 90,
+  "event_summary": {"app_focus": 274, "browser_tab": 81, "idle_start": 6, "login": 5, "outlook_activity": 0},
+  "app_weights": {"VS Code": "high"},
+  "top_apps": [{"app_name": "VS Code", "focus_events": 150}]
+}
+```
+
+`average_score` is the mean of the daily scores on days with activity, or `null` when there was
+no activity in the period. See [SCORING.md](SCORING.md). `top_apps` lists up to 8 apps by focus events.
+
+### `GET /reports/{employee_id}/trend?days=14`
+
+Per-day points for the last `days` (1–90) days, oldest first, ending today. Days without events
+have `has_activity: false` and `average_score: null`.
+
+### `GET /reports/{employee_id}/pdf?period=daily`
+
+The report as a PDF attachment (`report_{id}_{period}.pdf`).
+
+### `GET /team/summary?period=daily`
+
+The report for every employee in your organization, each with `id`, `name` and `role` added.
+
+## Agent ingestion
+
+### `POST /ingest`
+
+Headers: `X-Agent-Token: mdr_…`
+
+```json
+{
+  "events": [
+    {"event_type": "app_focus", "timestamp": "2026-09-26T10:30:00Z", "detail": {"app_name": "VS Code", "window_title": "main.py"}},
+    {"event_type": "browser_tab", "timestamp": "2026-09-26T10:35:00+03:00", "detail": {"tab_title": "FastAPI docs"}}
+  ]
+}
+```
+
+Response: `{"status": "success", "events_stored": 2, "events_rejected": 0}`
+
+- The token decides which employee the events belong to. `employee_id` on an event is optional;
+  if present it must match, or the event is rejected.
+- `event_type` is one of `login`, `logout`, `app_focus`, `idle_start`, `idle_end`,
+  `browser_tab`, `outlook_activity`.
+- Timestamps may carry any UTC offset and are stored in UTC. Events more than an hour in the
+  future are rejected.
+- Invalid events are **skipped and counted** in `events_rejected` instead of failing the batch.
+  `detail` keeps at most 10 scalar fields; strings are cut to 500 characters.
+- At most `MAX_INGEST_EVENTS` (default 1000) events per request, otherwise `413`.
+- `401` if the token is missing, wrong, or revoked.

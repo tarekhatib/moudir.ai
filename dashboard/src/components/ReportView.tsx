@@ -1,5 +1,5 @@
 import type { Summary } from '../types'
-import { scoreTone } from '../utils/format'
+import { formatScore, scoreTone, TONE_LABELS } from '../utils/format'
 import { TopAppsChart } from './charts/TopAppsChart'
 
 type Props = {
@@ -7,23 +7,34 @@ type Props = {
 }
 
 export function ReportView({ summary }: Props) {
-  const percent = Math.round(summary.average_score * 100)
-
   return (
     <>
       <section className="stats-grid">
         <article className="stat-card">
           <span className="label">Productivity score</span>
-          <strong className={`score ${scoreTone(summary.average_score)}`}>{percent}%</strong>
-          <span className="stat-hint">Estimate based on activity, not a timesheet</span>
+          <strong className={`score ${scoreTone(summary.average_score)}`}>{formatScore(summary.average_score)}</strong>
+          <span className={`tone-badge ${scoreTone(summary.average_score)}`}>
+            {TONE_LABELS[scoreTone(summary.average_score)]}
+          </span>
+          <span className="stat-hint">
+            {summary.average_score === null
+              ? 'No activity recorded this period'
+              : `Average of ${summary.days_active} active ${summary.days_active === 1 ? 'day' : 'days'} · an estimate, not a timesheet`}
+          </span>
         </article>
         <article className="stat-card">
           <span className="label">Productive hours</span>
-          <strong>{summary.total_productive_hours}</strong>
+          <strong>
+            {summary.total_productive_hours}
+            <span className="stat-unit">h</span>
+          </strong>
         </article>
         <article className="stat-card">
           <span className="label">Idle minutes</span>
-          <strong>{summary.total_idle_minutes}</strong>
+          <strong>
+            {summary.total_idle_minutes}
+            <span className="stat-unit">min</span>
+          </strong>
         </article>
         <article className="stat-card">
           <span className="label">Logins</span>
@@ -44,7 +55,7 @@ export function ReportView({ summary }: Props) {
 
         <article className="panel">
           <h2>Most used applications</h2>
-          <TopAppsChart apps={summary.top_apps ?? []} weights={summary.app_weights ?? {}} />
+          <TopAppsChart apps={summary.top_apps} weights={summary.app_weights ?? {}} />
         </article>
       </section>
     </>

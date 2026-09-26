@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { apiGet, errorMessage, isAbort } from '../api/client'
 import type { Period, TeamRow } from '../types'
-import { scoreTone } from '../utils/format'
+import { formatScore, scoreTone, TONE_LABELS } from '../utils/format'
 import { describePeriod } from '../utils/period'
 import { PeriodSelector } from './PeriodSelector'
 
@@ -25,7 +25,7 @@ const COLUMNS: { key: SortKey; label: string; numeric: boolean }[] = [
 // Below this score an employee is flagged in the overview.
 const ATTENTION_THRESHOLD = 0.5
 
-function sortValue(row: TeamRow, key: SortKey): string | number {
+function sortValue(row: TeamRow, key: SortKey): string | number | null {
   if (key === 'name') return row.name.toLowerCase()
   if (key === 'logins') return row.event_summary.login
   return row[key]
@@ -53,6 +53,8 @@ export function TeamOverview({ period, onPeriodChange, onOpenEmployee, onAddEmpl
     return [...rows].sort((a, b) => {
       const left = sortValue(a, sort.key)
       const right = sortValue(b, sort.key)
+      // Employees with no data always sort last, whichever direction.
+      if (left === null || right === null) return left === right ? 0 : left === null ? 1 : -1
       const order = left < right ? -1 : left > right ? 1 : 0
       return sort.descending ? -order : order
     })
@@ -60,10 +62,11 @@ export function TeamOverview({ period, onPeriodChange, onOpenEmployee, onAddEmpl
 
   const stats = useMemo(() => {
     if (!rows || rows.length === 0) return null
-    const average = rows.reduce((sum, row) => sum + row.average_score, 0) / rows.length
+    const scores = rows.flatMap((row) => (row.average_score === null ? [] : [row.average_score]))
+    const average = scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null
     const hours = rows.reduce((sum, row) => sum + row.total_productive_hours, 0)
-    const attention = rows.filter((row) => row.average_score < ATTENTION_THRESHOLD).length
-    return { average, hours, attention }
+    const attention = scores.filter((score) => score < ATTENTION_THRESHOLD).length
+    return { average, hours, attention, noData: rows.length - scores.length }
   }, [rows])
 
   const toggleSort = (key: SortKey) =>
@@ -101,16 +104,25 @@ export function TeamOverview({ period, onPeriodChange, onOpenEmployee, onAddEmpl
           </article>
           <article className="stat-card">
             <span className="label">Team average score</span>
-            <strong className={`score ${scoreTone(stats.average)}`}>{Math.round(stats.average * 100)}%</strong>
+            <strong className={`score ${scoreTone(stats.average)}`}>{formatScore(stats.average)}</strong>
+            <span className={`tone-badge ${scoreTone(stats.average)}`}>
+              {TONE_LABELS[scoreTone(stats.average)]}
+            </span>
           </article>
           <article className="stat-card">
             <span className="label">Total productive hours</span>
-            <strong>{stats.hours.toFixed(1)}</strong>
+            <strong>
+              {stats.hours.toFixed(1)}
+              <span className="stat-unit">h</span>
+            </strong>
           </article>
           <article className="stat-card">
             <span className="label">Need attention</span>
             <strong className={stats.attention > 0 ? 'score bad' : 'score good'}>{stats.attention}</strong>
-            <span className="stat-hint">Score below {ATTENTION_THRESHOLD * 100}%</span>
+            <span className="stat-hint">
+              Score below {ATTENTION_THRESHOLD * 100}% this period
+              {stats.noData > 0 ? ` · ${stats.noData} with no activity` : ''}
+            </span>
           </article>
         </section>
       ) : null}
@@ -139,7 +151,7 @@ export function TeamOverview({ period, onPeriodChange, onOpenEmployee, onAddEmpl
               </thead>
               <tbody>
                 {sorted.map((row) => {
-                  const percent = Math.round(row.average_score * 100)
+                  const percent = Math.round((row.average_score ?? 0) * 100)
                   return (
                     <tr key={row.id}>
                       <td>
@@ -153,7 +165,8 @@ export function TeamOverview({ period, onPeriodChange, onOpenEmployee, onAddEmpl
                           <span className="score-bar" aria-hidden="true">
                             <span className={`score-fill ${scoreTone(row.average_score)}`} style={{ width: `${percent}%` }} />
                           </span>
-                          <span className={`score ${scoreTone(row.average_score)}`}>{percent}%</span>
+                          <span className={`score ${scoreTone(row.average_score)}`}>{formatScore(row.average_score)}</span>
+                          <span className={`tone-badge ${scoreTone(row.average_score)}`}>{TONE_LABELS[scoreTone(row.average_score)]}</span>
                         </span>
                       </td>
                       <td className="numeric">{row.total_productive_hours}</td>

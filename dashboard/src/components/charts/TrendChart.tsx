@@ -86,7 +86,8 @@ export function TrendChart({ title, points, kind, format, valueLabel, max }: Pro
           ))}
 
           {points.map((point, index) =>
-            index % labelEvery === 0 || index === n - 1 ? (
+            // Keep the last label, and drop a regular one that would crowd it.
+            (index % labelEvery === 0 && n - 1 - index >= labelEvery) || index === n - 1 ? (
               <text key={point.fullLabel} className="chart-axis" x={x(index)} y={HEIGHT - 8} textAnchor="middle">
                 {point.label}
               </text>

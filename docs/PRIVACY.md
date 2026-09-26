@@ -1,6 +1,6 @@
 # Moudir.ai Privacy & Data Protection Model
 
-This document outlines the telemetry data collected by Moudir.ai, explicit data exclusions, and the privacy and retention model implemented during the pilot stage.
+This document outlines the telemetry data collected by Moudir.ai, explicit data exclusions, and how access and retention work.
 
 ---
 
@@ -16,7 +16,7 @@ Moudir.ai operates on high-level activity telemetry rather than intrusive survei
 | `browser_tab` | `{"tab_title": string}` | Measure web-based research and tool usage by page title |
 | `idle_start` | `{}` | Mark beginning of user inactivity (no mouse/keyboard input) |
 | `idle_end` | `{"duration_seconds": number}` | Record duration of user inactivity |
-| `outlook_activity` | `{"activity_type": string}` | High-level collaboration events (e.g., `email_sent`, `meeting_joined`) |
+| `outlook_activity` | `{"activity_type": string}` | High-level collaboration signal (currently `window_focused` when Outlook is in the foreground) |
 
 ---
 
@@ -34,20 +34,34 @@ Per the Moudir.ai technical architecture and API contract, the following categor
 
 ---
 
-## Access & Retention Model (Pilot Stage)
+## Access & Retention Model
 
-1. **Access Control**:
-   - Telemetry ingestion (`POST /ingest`) requires a pre-shared secret token passed via `X-Agent-Token`.
-   - The manager dashboard and backend REST API currently operate in an open pilot mode on `localhost` without individual user authentication or role-based access control (RBAC).
-   - Endpoints are intended solely for local network evaluation and internal demonstration.
+1. **Who can see the data**:
+   - Each company is a separate organization. Managers sign in with email and password and can
+     only see employees and activity in their own organization; requests for another
+     organization's employees return `404`.
+   - Passwords are hashed with Argon2. Sessions are random tokens in `HttpOnly` cookies, stored
+     server-side only as hashes, and are revoked on sign-out or password change.
 
-2. **Data Storage & Retention**:
-   - Activity events and computed reports are persisted in the local SQLite database (`data/moudir.db`).
-   - In the pilot implementation, events are retained indefinitely until the database file is manually reset or deleted.
+2. **How the agent authenticates**:
+   - Every employee has their own agent token, issued from the dashboard and stored only as a
+     hash. A token can only add events for its own employee, and can be rotated or revoked at
+     any time.
+   - Events are sent over HTTPS in production.
+
+3. **Data minimisation on ingest**:
+   - The backend accepts only the event types listed above, keeps at most 10 scalar `detail`
+     fields per event and truncates text to 500 characters.
+
+4. **Storage & retention**:
+   - Data is stored in PostgreSQL in production.
+   - Activity is kept until the employee or organization is deleted. Deleting an employee in the
+     dashboard permanently removes their settings and all their activity. There is no automatic
+     retention limit yet (see [KNOWN-ISSUES.md](KNOWN-ISSUES.md)).
 
 ---
 
-## Pilot Disclaimer
+## Disclaimer
 
 > [!NOTE]
-> Moudir.ai is currently a **pilot demonstration platform**. The documentation and privacy measures described herein reflect technical design choices of the pilot implementation and do **not** constitute formal legal certifications or compliance guarantees under GDPR, CCPA, HIPAA, SOC 2, or regional workplace monitoring laws.
+> The measures described here are technical design choices. They do **not** constitute legal certification or compliance with GDPR, CCPA, HIPAA, SOC 2 or regional workplace-monitoring laws. Employers using Moudir are responsible for informing employees and having a lawful basis for monitoring in their jurisdiction.

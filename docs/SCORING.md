@@ -1,6 +1,6 @@
 # Moudir.ai Scoring Heuristics & Algorithm
 
-This document details the productivity scoring algorithm and metrics computation implemented in the Moudir.ai pilot backend (`backend/app/main.py`).
+This document details the productivity scoring algorithm and metrics computation implemented in [`backend/app/scoring.py`](../backend/app/scoring.py).
 
 ---
 
@@ -27,23 +27,32 @@ When querying `GET /reports/{employee_id}?period=<period>`, the reporting engine
 
 ## Scoring Model Breakdown
 
-The aggregate score (`average_score`) is a normalized float in the range `[0.0, 1.0]`. It is computed as a linear combination of four sub-scores:
+Scores are computed **per UTC day**. Each day with at least one event gets a score in `[0.0, 1.0]`:
 
-$$\text{Total Score} = \min\left(1.0, \max\left(0.0, \sum w_i \cdot s_i\right)\right)$$
+$$\text{Day Score} = \min\left(1.0, \max\left(0.0, \sum w_i \cdot s_i\right)\right)$$
+
+A period's `average_score` (daily, weekly or monthly) is the **mean of the day scores on days with
+activity**. Days without any events are left out rather than counted as zero, and `days_active`
+says how many days were averaged. If the period has no activity at all, `average_score` is
+`null` and the dashboard shows "No data" instead of a score.
+
+Scoring per day keeps the thresholds below meaningful at every period length: 20 focus events is
+a full day of app usage, not a full month of it, and two short idle periods a day don't add up to
+a zero idle score over a month.
 
 ### 1. Sub-Score Formulas
 
 1. **App Usage Score (`app_usage_score`)**:
    $$\text{app\_usage\_score} = \min\left(1.0, \frac{\text{count}(\text{app\_focus})}{20}\right)$$
-   - *Rationale*: Measures active engagement with desktop productivity applications. Reaches maximum (1.0) at 20 or more focus events in the period.
+   - *Rationale*: Measures active engagement with desktop productivity applications. Reaches maximum (1.0) at 20 or more focus events in the day.
 
 2. **Browser Score (`browser_score`)**:
    $$\text{browser\_score} = \min\left(1.0, \frac{\text{count}(\text{browser\_tab})}{15}\right)$$
-   - *Rationale*: Measures research and web-based tool engagement. Reaches maximum (1.0) at 15 or more recorded tab context switches.
+   - *Rationale*: Measures research and web-based tool engagement. Reaches maximum (1.0) at 15 or more recorded tab context switches in the day.
 
 3. **Punctuality Score (`punctuality_score`)**:
    $$\text{punctuality\_score} = \begin{cases} 1.0 & \text{if } \text{count}(\text{login}) > 0 \\ 0.0 & \text{otherwise} \end{cases}$$
-   - *Rationale*: Indicates whether an employee logged in and initialized an active session during the period.
+   - *Rationale*: Indicates whether an employee logged in and initialized an active session that day.
 
 4. **Idle Score (`idle_score`)**:
    $$\text{idle\_score} = \max\left(0.0, 1.0 - (\text{count}(\text{idle\_start}) \times 0.15)\right)$$

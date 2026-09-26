@@ -1,48 +1,48 @@
-from datetime import datetime, timezone
-import pytest
+from datetime import datetime, timedelta, timezone
+
+from tests.conftest import agent_headers
 
 
-def test_health_check(client):
-    response = client.get("/health")
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def ingest(client, employee_id: int, events: list[dict]):
+    response = client.post("/ingest", json={"events": events}, headers=agent_headers(client, employee_id))
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_health_check(anon_client):
+    response = anon_client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
 
 def test_create_list_get_update_employee(client):
-    # 1. Create employee
     create_payload = {
         "name": "  Alice Smith  ",
         "role": "  Frontend Engineer  ",
-        "email": "  alice@example.com  ",
+        "email": "  Alice@Example.com  ",
         "job_description": "  Build user interfaces  ",
         "role_tag": "  engineering  ",
     }
     response = client.post("/employees", json=create_payload)
-    assert response.status_code == 200
+    assert response.status_code == 201
     data = response.json()
-    assert data["id"] is not None
     employee_id = data["id"]
-    # Verify values were trimmed
     assert data["name"] == "Alice Smith"
     assert data["role"] == "Frontend Engineer"
     assert data["email"] == "alice@example.com"
     assert data["job_description"] == "Build user interfaces"
     assert data["role_tag"] == "engineering"
+    assert data["agent_token_created_at"] is None
 
-    # 2. List employees
-    list_response = client.get("/employees")
-    assert list_response.status_code == 200
-    employees = list_response.json()
-    assert len(employees) == 1
-    assert employees[0]["id"] == employee_id
-    assert employees[0]["name"] == "Alice Smith"
+    employees = client.get("/employees").json()
+    assert [e["id"] for e in employees] == [employee_id]
 
-    # 3. Get single employee
-    get_response = client.get(f"/employees/{employee_id}")
-    assert get_response.status_code == 200
-    assert get_response.json()["name"] == "Alice Smith"
+    assert client.get(f"/employees/{employee_id}").json()["name"] == "Alice Smith"
 
-    # 4. Update employee
     update_payload = {
         "name": "Alice Johnson",
         "role": "Senior Engineer",
@@ -50,37 +50,22 @@ def test_create_list_get_update_employee(client):
         "job_description": "Lead frontend architecture",
         "role_tag": "engineering-lead",
     }
-    put_response = client.put(f"/employees/{employee_id}", json=update_payload)
-    assert put_response.status_code == 200
-    updated_data = put_response.json()
-    assert updated_data["name"] == "Alice Johnson"
-    assert updated_data["email"] == "alice.j@example.com"
-    assert updated_data["job_description"] == "Lead frontend architecture"
+    updated = client.put(f"/employees/{employee_id}", json=update_payload)
+    assert updated.status_code == 200
+    assert updated.json()["name"] == "Alice Johnson"
+    assert updated.json()["job_description"] == "Lead frontend architecture"
 
 
-def test_employee_validation_empty_name(client):
-    # Empty string name
-    response = client.post("/employees", json={"name": ""})
-    assert response.status_code == 422
-
-    # Whitespace-only name
-    response = client.post("/employees", json={"name": "   "})
-    assert response.status_code == 422
+def test_employee_validation(client):
+    assert client.post("/employees", json={"name": ""}).status_code == 422
+    assert client.post("/employees", json={"name": "   "}).status_code == 422
+    assert client.post("/employees", json={"name": "Bad Email", "email": "not-an-email"}).status_code == 422
+    assert client.post("/employees", json={"name": "x" * 201}).status_code == 422
 
 
 def test_employee_normalization_optional_fields(client):
-    # Empty optional fields should be normalized to None (null)
-    payload = {
-        "name": "Bob Doe",
-        "role": "   ",
-        "email": "",
-        "job_description": "  ",
-        "role_tag": None,
-    }
-    response = client.post("/employees", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["name"] == "Bob Doe"
+    payload = {"name": "Bob Doe", "role": "   ", "email": "", "job_description": "  ", "role_tag": None}
+    data = client.post("/employees", json=payload).json()
     assert data["role"] is None
     assert data["email"] is None
     assert data["job_description"] is None
@@ -88,271 +73,166 @@ def test_employee_normalization_optional_fields(client):
 
 
 def test_duplicate_email_conflict(client):
-    # Create first employee with email
-    client.post(
-        "/employees",
-        json={"name": "User One", "email": "unique@example.com"},
-    )
+    client.post("/employees", json={"name": "User One", "email": "unique@example.com"})
 
-    # Creating second employee with identical email must return 409 Conflict
-    conflict_create = client.post(
-        "/employees",
-        json={"name": "User Two", "email": "unique@example.com"},
-    )
+    conflict_create = client.post("/employees", json={"name": "User Two", "email": "UNIQUE@example.com"})
     assert conflict_create.status_code == 409
     assert conflict_create.json()["detail"] == "An employee with this email already exists"
 
-    # Create second employee with different email
-    user2 = client.post(
-        "/employees",
-        json={"name": "User Two", "email": "user2@example.com"},
-    ).json()
-
-    # Updating second employee to first employee's email must return 409 Conflict
-    conflict_update = client.put(
-        f"/employees/{user2['id']}",
-        json={"name": "User Two Updated", "email": "unique@example.com"},
-    )
+    user2 = client.post("/employees", json={"name": "User Two", "email": "user2@example.com"}).json()
+    conflict_update = client.put(f"/employees/{user2['id']}", json={"name": "User Two", "email": "unique@example.com"})
     assert conflict_update.status_code == 409
-    assert conflict_update.json()["detail"] == "An employee with this email already exists"
 
-    # Updating second employee keeping its own email should succeed
-    self_update = client.put(
-        f"/employees/{user2['id']}",
-        json={"name": "User Two Updated", "email": "user2@example.com"},
-    )
+    self_update = client.put(f"/employees/{user2['id']}", json={"name": "User Two Updated", "email": "user2@example.com"})
     assert self_update.status_code == 200
 
 
 def test_multiple_employees_with_no_email_allowed(client):
-    # Multiple employees without email (None or empty) should not conflict
-    res1 = client.post("/employees", json={"name": "User NoEmail 1", "email": None})
-    res2 = client.post("/employees", json={"name": "User NoEmail 2", "email": ""})
-    assert res1.status_code == 200
-    assert res2.status_code == 200
+    assert client.post("/employees", json={"name": "No Email 1", "email": None}).status_code == 201
+    assert client.post("/employees", json={"name": "No Email 2", "email": ""}).status_code == 201
 
 
 def test_unknown_employee_returns_404(client):
     unknown_id = 99999
-
-    # GET employee
     assert client.get(f"/employees/{unknown_id}").status_code == 404
-    # PUT employee
     assert client.put(f"/employees/{unknown_id}", json={"name": "Ghost"}).status_code == 404
-    # GET config
     assert client.get(f"/config/{unknown_id}").status_code == 404
-    # POST config
     assert client.post(f"/config/{unknown_id}", json={"min_productive_hours": 7.0}).status_code == 404
-    # GET reports
     assert client.get(f"/reports/{unknown_id}").status_code == 404
-    # GET reports PDF
     assert client.get(f"/reports/{unknown_id}/pdf").status_code == 404
+    assert client.get(f"/reports/{unknown_id}/trend").status_code == 404
+    assert client.post(f"/employees/{unknown_id}/agent-token").status_code == 404
 
 
 def test_config_operations(client):
-    emp = client.post("/employees", json={"name": "Config Test Emp"}).json()
-    emp_id = emp["id"]
+    emp_id = client.post("/employees", json={"name": "Config Test Emp"}).json()["id"]
 
-    # Initial config should exist due to auto-creation during employee creation
-    cfg_res = client.get(f"/config/{emp_id}")
-    assert cfg_res.status_code == 200
-    cfg = cfg_res.json()
-    assert cfg["employee_id"] == emp_id
+    cfg = client.get(f"/config/{emp_id}")
+    assert cfg.status_code == 200
+    assert cfg.json()["employee_id"] == emp_id
 
-    # Update config with custom weights and schedule
     save_payload = {
         "job_description": "Full Stack Dev",
         "role_tag": "core-team",
         "software_weights": {"VS Code": "high", "YouTube": "low"},
         "category_weights": {"app_usage": 0.5, "browser": 0.2, "punctuality": 0.2, "idle": 0.1},
-        "schedule": {"mon": [["09:00", "17:00"]]},
+        "schedule": {"mon": [["14:00", "18:00"], ["09:00", "13:00"]]},
         "min_productive_hours": 7.5,
         "max_idle_minutes": 45,
     }
-    save_res = client.post(f"/config/{emp_id}", json=save_payload)
-    assert save_res.status_code == 200
-    saved = save_res.json()
-    assert saved["job_description"] == "Full Stack Dev"
-    assert saved["min_productive_hours"] == 7.5
-    assert saved["software_weights"]["VS Code"] == "high"
+    saved = client.post(f"/config/{emp_id}", json=save_payload)
+    assert saved.status_code == 200
+    body = saved.json()
+    assert body["job_description"] == "Full Stack Dev"
+    assert body["min_productive_hours"] == 7.5
+    assert body["software_weights"]["VS Code"] == "high"
+    assert body["schedule"]["mon"] == [["09:00", "13:00"], ["14:00", "18:00"]]
 
 
-def test_ingest_auth_and_activity(client):
-    emp = client.post("/employees", json={"name": "Ingest Target"}).json()
-    emp_id = emp["id"]
-
-    events_payload = {
-        "events": [
-            {
-                "employee_id": emp_id,
-                "event_type": "login",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "detail": {},
-            },
-            {
-                "employee_id": emp_id,
-                "event_type": "app_focus",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "detail": {"app_name": "VS Code", "window_title": "main.py"},
-            },
-            {
-                "employee_id": emp_id,
-                "event_type": "browser_tab",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "detail": {"tab_title": "FastAPI Docs"},
-            },
-            {
-                "employee_id": emp_id,
-                "event_type": "idle_start",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "detail": {},
-            },
-        ]
-    }
-
-    # Missing auth header
-    unauth_res = client.post("/ingest", json=events_payload)
-    assert unauth_res.status_code == 401
-
-    # Invalid auth header
-    bad_auth_res = client.post(
-        "/ingest",
-        json=events_payload,
-        headers={"X-Agent-Token": "wrong-token"},
-    )
-    assert bad_auth_res.status_code == 401
-
-    # Valid auth header
-    success_res = client.post(
-        "/ingest",
-        json=events_payload,
-        headers={"X-Agent-Token": "test-secret-token"},
-    )
-    assert success_res.status_code == 200
-    assert success_res.json() == {"status": "success", "events_stored": 4}
+def test_config_validation(client):
+    emp_id = client.post("/employees", json={"name": "Validated"}).json()["id"]
+    bad_payloads = [
+        {"category_weights": {"app_usage": 0.5, "browser": 0.2, "punctuality": 0.2, "idle": 0.3}},
+        {"category_weights": {"typing_speed": 1.0}},
+        {"software_weights": {"VS Code": "extreme"}},
+        {"software_weights": {"Slack": "high", "slack": "low"}},
+        {"schedule": {"mon": [["17:00", "09:00"]]}},
+        {"schedule": {"mon": [["09:00", "13:00"], ["12:00", "15:00"]]}},
+        {"schedule": {"funday": [["09:00", "13:00"]]}},
+        {"schedule": {"mon": [["9am", "5pm"]]}},
+        {"min_productive_hours": 25},
+        {"max_idle_minutes": -1},
+    ]
+    for payload in bad_payloads:
+        assert client.post(f"/config/{emp_id}", json=payload).status_code == 422, payload
 
 
 def test_reports_daily_weekly_monthly(client):
-    emp = client.post("/employees", json={"name": "Report Subject"}).json()
-    emp_id = emp["id"]
+    emp_id = client.post("/employees", json={"name": "Report Subject"}).json()["id"]
+    now_iso = _now_iso()
+    ingest(client, emp_id, [
+        {"event_type": "login", "timestamp": now_iso},
+        {"event_type": "app_focus", "timestamp": now_iso, "detail": {"app_name": "Code"}},
+        {"event_type": "app_focus", "timestamp": now_iso, "detail": {"app_name": "Terminal"}},
+        {"event_type": "browser_tab", "timestamp": now_iso, "detail": {"tab_title": "GitHub"}},
+        {"event_type": "idle_start", "timestamp": now_iso},
+    ])
 
-    # Ingest mock events
-    now_iso = datetime.now(timezone.utc).isoformat()
-    client.post(
-        "/ingest",
-        json={
-            "events": [
-                {"employee_id": emp_id, "event_type": "login", "timestamp": now_iso, "detail": {}},
-                {"employee_id": emp_id, "event_type": "app_focus", "timestamp": now_iso, "detail": {"app_name": "Code"}},
-                {"employee_id": emp_id, "event_type": "app_focus", "timestamp": now_iso, "detail": {"app_name": "Terminal"}},
-                {"employee_id": emp_id, "event_type": "browser_tab", "timestamp": now_iso, "detail": {"tab_title": "GitHub"}},
-                {"employee_id": emp_id, "event_type": "idle_start", "timestamp": now_iso, "detail": {}},
-            ]
-        },
-        headers={"X-Agent-Token": "test-secret-token"},
-    )
+    daily = client.get(f"/reports/{emp_id}?period=daily").json()
+    assert daily["employee_id"] == emp_id
+    assert daily["period"] == "daily"
+    assert daily["days_active"] == 1
+    assert daily["event_summary"] == {"app_focus": 2, "browser_tab": 1, "idle_start": 1, "login": 1, "outlook_activity": 0}
+    assert daily["total_productive_hours"] == 0.2
+    assert daily["total_idle_minutes"] == 15
+    # 0.4 * 2/20 + 0.2 * 1/15 + 0.2 * 1 + 0.2 * 0.85
+    assert abs(daily["average_score"] - (0.04 + 0.2 / 15 + 0.2 + 0.17)) < 1e-9
 
-    # Daily report
-    daily_res = client.get(f"/reports/{emp_id}?period=daily")
-    assert daily_res.status_code == 200
-    daily_data = daily_res.json()
-    assert daily_data["employee_id"] == emp_id
-    assert daily_data["period"] == "daily"
-    assert "average_score" in daily_data
-    assert daily_data["event_summary"]["app_focus"] == 2
-    assert daily_data["event_summary"]["browser_tab"] == 1
-    assert daily_data["event_summary"]["idle_start"] == 1
-    assert daily_data["event_summary"]["login"] == 1
-    assert daily_data["total_productive_hours"] == 0.2  # 2 events * 0.1
-    assert daily_data["total_idle_minutes"] == 15      # 1 event * 15
-
-    # Weekly report
-    weekly_res = client.get(f"/reports/{emp_id}?period=weekly")
-    assert weekly_res.status_code == 200
-    assert weekly_res.json()["period"] == "weekly"
-
-    # Monthly report
-    monthly_res = client.get(f"/reports/{emp_id}?period=monthly")
-    assert monthly_res.status_code == 200
-    assert monthly_res.json()["period"] == "monthly"
-
-    # Invalid period
-    invalid_period_res = client.get(f"/reports/{emp_id}?period=yearly")
-    assert invalid_period_res.status_code == 422
+    assert client.get(f"/reports/{emp_id}?period=weekly").json()["period"] == "weekly"
+    assert client.get(f"/reports/{emp_id}?period=monthly").json()["period"] == "monthly"
+    assert client.get(f"/reports/{emp_id}?period=yearly").status_code == 422
 
 
 def test_pdf_export(client):
-    emp = client.post("/employees", json={"name": "PDF Subject"}).json()
-    emp_id = emp["id"]
+    emp_id = client.post("/employees", json={"name": "PDF <Subject>"}).json()["id"]
+    ingest(client, emp_id, [{"event_type": "app_focus", "timestamp": _now_iso(), "detail": {"app_name": "Code & Co"}}])
 
     pdf_res = client.get(f"/reports/{emp_id}/pdf?period=daily")
     assert pdf_res.status_code == 200
     assert pdf_res.headers["content-type"] == "application/pdf"
     assert pdf_res.content.startswith(b"%PDF")
 
+    empty_id = client.post("/employees", json={"name": "No Activity"}).json()["id"]
+    assert client.get(f"/reports/{empty_id}/pdf?period=weekly").status_code == 200
+
 
 def test_delete_employee_removes_related_data(client, db_session):
     from app import models
 
     emp_id = client.post("/employees", json={"name": "To Delete", "email": "gone@example.com"}).json()["id"]
-    client.post(
-        "/ingest",
-        json={"events": [{"employee_id": emp_id, "event_type": "login", "timestamp": datetime.now(timezone.utc).isoformat(), "detail": {}}]},
-        headers={"X-Agent-Token": "test-secret-token"},
-    )
+    ingest(client, emp_id, [{"event_type": "login", "timestamp": _now_iso()}])
 
-    delete_res = client.delete(f"/employees/{emp_id}")
-    assert delete_res.status_code == 204
-
+    assert client.delete(f"/employees/{emp_id}").status_code == 204
     assert client.get(f"/employees/{emp_id}").status_code == 404
     assert client.get("/employees").json() == []
     assert db_session.query(models.ActivityLog).filter_by(employee_id=emp_id).count() == 0
     assert db_session.query(models.Config).filter_by(employee_id=emp_id).count() == 0
 
-    # Email is free to reuse after deletion
-    assert client.post("/employees", json={"name": "New Person", "email": "gone@example.com"}).status_code == 200
-
-    # Deleting again is a 404
     assert client.delete(f"/employees/{emp_id}").status_code == 404
+    assert client.post("/employees", json={"name": "New Person", "email": "gone@example.com"}).status_code == 201
 
 
 def test_team_summary(client):
     first = client.post("/employees", json={"name": "First", "role": "Engineer"}).json()["id"]
     second = client.post("/employees", json={"name": "Second"}).json()["id"]
-    now_iso = datetime.now(timezone.utc).isoformat()
-    client.post(
-        "/ingest",
-        json={"events": [
-            {"employee_id": first, "event_type": "login", "timestamp": now_iso, "detail": {}},
-            {"employee_id": first, "event_type": "app_focus", "timestamp": now_iso, "detail": {"app_name": "Code"}},
-        ]},
-        headers={"X-Agent-Token": "test-secret-token"},
-    )
+    now_iso = _now_iso()
+    ingest(client, first, [
+        {"event_type": "login", "timestamp": now_iso},
+        {"event_type": "app_focus", "timestamp": now_iso, "detail": {"app_name": "Code"}},
+    ])
 
-    res = client.get("/team/summary?period=weekly")
-    assert res.status_code == 200
-    rows = res.json()
+    rows = client.get("/team/summary?period=weekly").json()
     assert [row["id"] for row in rows] == [first, second]
     assert rows[0]["name"] == "First"
     assert rows[0]["role"] == "Engineer"
     assert rows[0]["period"] == "weekly"
     assert rows[0]["event_summary"]["app_focus"] == 1
-    assert rows[1]["event_summary"]["login"] == 0
+    assert rows[0]["average_score"] is not None
+    assert rows[1]["average_score"] is None
+    assert rows[1]["days_active"] == 0
 
     assert client.get("/team/summary?period=yearly").status_code == 422
 
 
 def test_report_includes_top_apps(client):
     emp_id = client.post("/employees", json={"name": "App User"}).json()["id"]
-    now_iso = datetime.now(timezone.utc).isoformat()
-    events = [
-        {"employee_id": emp_id, "event_type": "app_focus", "timestamp": now_iso, "detail": {"app_name": name}}
+    now_iso = _now_iso()
+    ingest(client, emp_id, [
+        {"event_type": "app_focus", "timestamp": now_iso, "detail": {"app_name": name}}
         for name in ["VS Code", "Slack", "VS Code", "VS Code", "Slack", "Figma"]
-    ]
-    client.post("/ingest", json={"events": events}, headers={"X-Agent-Token": "test-secret-token"})
+    ])
 
-    top_apps = client.get(f"/reports/{emp_id}?period=daily").json()["top_apps"]
-    assert top_apps == [
+    assert client.get(f"/reports/{emp_id}?period=daily").json()["top_apps"] == [
         {"app_name": "VS Code", "focus_events": 3},
         {"app_name": "Slack", "focus_events": 2},
         {"app_name": "Figma", "focus_events": 1},
@@ -360,34 +240,25 @@ def test_report_includes_top_apps(client):
 
 
 def test_report_trend(client):
-    from datetime import timedelta
-
     emp_id = client.post("/employees", json={"name": "Trend Subject"}).json()["id"]
     now = datetime.now(timezone.utc)
     two_days_ago = (now - timedelta(days=2)).isoformat()
-    client.post(
-        "/ingest",
-        json={"events": [
-            {"employee_id": emp_id, "event_type": "login", "timestamp": now.isoformat(), "detail": {}},
-            {"employee_id": emp_id, "event_type": "app_focus", "timestamp": two_days_ago, "detail": {"app_name": "Code"}},
-            {"employee_id": emp_id, "event_type": "app_focus", "timestamp": two_days_ago, "detail": {"app_name": "Code"}},
-        ]},
-        headers={"X-Agent-Token": "test-secret-token"},
-    )
+    ingest(client, emp_id, [
+        {"event_type": "login", "timestamp": now.isoformat()},
+        {"event_type": "app_focus", "timestamp": two_days_ago, "detail": {"app_name": "Code"}},
+        {"event_type": "app_focus", "timestamp": two_days_ago, "detail": {"app_name": "Code"}},
+    ])
 
-    res = client.get(f"/reports/{emp_id}/trend?days=7")
-    assert res.status_code == 200
-    body = res.json()
+    body = client.get(f"/reports/{emp_id}/trend?days=7").json()
     assert body["days"] == 7
     points = body["points"]
     assert len(points) == 7
-    # Oldest first, ending today (UTC)
     assert points[-1]["date"] == now.date().isoformat()
     assert points[-1]["event_summary"]["login"] == 1
     assert points[-3]["event_summary"]["app_focus"] == 2
     assert points[-3]["has_activity"] is True
     assert points[0]["has_activity"] is False
+    assert points[0]["average_score"] is None
 
     assert client.get(f"/reports/{emp_id}/trend?days=0").status_code == 422
     assert client.get(f"/reports/{emp_id}/trend?days=91").status_code == 422
-    assert client.get("/reports/99999/trend").status_code == 404

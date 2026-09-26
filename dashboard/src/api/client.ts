@@ -1,5 +1,14 @@
-// Central place for backend API calls. Base URL configurable via .env (VITE_API_URL).
-export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// Central place for backend API calls. The API is served from the same origin under /api
+// (the Vite dev server and the production proxy forward it), so the session cookie just works.
+export const API_URL = import.meta.env.VITE_API_URL || '/api'
+
+const OFFLINE_MESSAGE = "Can't connect to Moudir right now. Check your connection and try again."
+
+// Called when the session has expired or been revoked, so the app can show the sign-in screen.
+let onUnauthorized: (() => void) | null = null
+export function setUnauthorizedHandler(handler: (() => void) | null) {
+  onUnauthorized = handler
+}
 
 export class ApiError extends Error {
   status: number
@@ -34,12 +43,14 @@ async function request<T>(method: string, path: string, body?: unknown, signal?:
       method,
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
+      credentials: 'include',
       signal,
     })
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw error
-    throw new ApiError('Cannot reach the backend. Is it running?', 0)
+    throw new ApiError(OFFLINE_MESSAGE, 0)
   }
+  if (res.status === 401 && !path.startsWith('/auth/')) onUnauthorized?.()
   if (!res.ok) throw await toApiError(res, `${method} ${path} failed (${res.status})`)
   if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
@@ -53,10 +64,11 @@ export const apiDelete = (path: string) => request<void>('DELETE', path)
 export async function apiDownload(path: string, filename: string): Promise<void> {
   let res: Response
   try {
-    res = await fetch(`${API_URL}${path}`)
+    res = await fetch(`${API_URL}${path}`, { credentials: 'include' })
   } catch {
-    throw new ApiError('Cannot reach the backend. Is it running?', 0)
+    throw new ApiError(OFFLINE_MESSAGE, 0)
   }
+  if (res.status === 401) onUnauthorized?.()
   if (!res.ok) throw await toApiError(res, `Download failed (${res.status})`)
 
   const blob = await res.blob()

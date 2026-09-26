@@ -1,40 +1,47 @@
 import os
-import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-# Set test environment variable before importing app modules
-os.environ["AGENT_TOKEN"] = "test-secret-token"
+# Configure the app before importing it: in-memory database, no cross-origin config.
+os.environ["DATABASE_URL"] = "sqlite://"
+os.environ["CORS_ORIGINS"] = ""
 
-from app.database import Base, get_db
-import app.main as main_module
-from app.main import app
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
+from sqlalchemy.pool import StaticPool  # noqa: E402
 
+from app.database import Base, get_db  # noqa: E402
+from app.main import app  # noqa: E402
+from app.security import login_limiter  # noqa: E402
 
-# Use an in-memory SQLite database shared across the thread for tests
-SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
-
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
+engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+PASSWORD = "correct-horse-battery"
+
+
+def override_get_db():
+    session = TestingSessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+
+
+app.dependency_overrides[get_db] = override_get_db
 
 
 @pytest.fixture(autouse=True)
 def setup_database():
-    """Create fresh database tables before each test and drop after."""
+    """Fresh tables and rate-limit state for every test."""
     Base.metadata.create_all(bind=engine)
+    login_limiter.reset()
     yield
     Base.metadata.drop_all(bind=engine)
 
 
 @pytest.fixture
 def db_session():
-    """Yield a database session for direct test setup/assertions."""
     session = TestingSessionLocal()
     try:
         yield session
@@ -43,18 +50,37 @@ def db_session():
 
 
 @pytest.fixture
-def client(monkeypatch):
-    """Yield a FastAPI test client with get_db overridden."""
-    monkeypatch.setattr(main_module, "AGENT_TOKEN", "test-secret-token")
-
-    def override_get_db():
-        session = TestingSessionLocal()
-        try:
-            yield session
-        finally:
-            session.close()
-
-    app.dependency_overrides[get_db] = override_get_db
+def anon_client():
     with TestClient(app) as test_client:
         yield test_client
-    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def make_client():
+    """Factory for a client signed in as the owner of a new organization."""
+    clients = []
+
+    def _make(org: str = "Acme", email: str = "owner@acme.example") -> TestClient:
+        test_client = TestClient(app)
+        clients.append(test_client)
+        response = test_client.post(
+            "/auth/signup",
+            json={"organization_name": org, "name": "Owner", "email": email, "password": PASSWORD},
+        )
+        assert response.status_code == 201, response.text
+        return test_client
+
+    yield _make
+    for test_client in clients:
+        test_client.close()
+
+
+@pytest.fixture
+def client(make_client):
+    """Client signed in as the owner of the "Acme" organization."""
+    return make_client()
+
+
+def agent_headers(test_client: TestClient, employee_id: int) -> dict:
+    token = test_client.post(f"/employees/{employee_id}/agent-token").json()["agent_token"]
+    return {"X-Agent-Token": token}

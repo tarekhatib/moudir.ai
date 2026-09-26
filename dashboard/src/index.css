@@ -1,29 +1,172 @@
+/*
+ * Moudir design tokens — "Cedar & paper".
+ * Source of truth: the Moudir Design System (tokens.json). Keep names in sync.
+ * Light is the default; dark follows the OS unless <html data-theme> forces one.
+ */
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+  --paper: #f5f4ef;
+  --surface: #ffffff;
+  --surface-sunken: #eeece5;
+  --sidebar: #efede6;
+  --line: #e3e0d7;
+  --line-strong: #c9c5b9;
+  --line-control: #8a867b;
+  --ink: #1b1c19;
+  --ink-2: #4a4b45;
+  --ink-3: #6b6a62;
+  --cedar: #1d4f43;
+  --cedar-hover: #163d34;
+  --cedar-wash: #e3ece7;
+  --on-cedar: #ffffff;
+  --saffron: #d9a13b;
+  --positive: #1e7a4c;
+  --positive-wash: #e6f2eb;
+  --caution: #9a5b00;
+  --caution-wash: #f8eedb;
+  --critical: #b3261e;
+  --critical-wash: #f9e6e3;
+  --on-critical: #ffffff;
+  --shadow-pop: 0 8px 24px rgba(27, 28, 25, 0.12), 0 1px 2px rgba(27, 28, 25, 0.08);
+  --shadow-thumb: 0 1px 2px rgba(27, 28, 25, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --paper: #121412;
+    --surface: #1a1d1b;
+    --surface-sunken: #222624;
+    --sidebar: #161816;
+    --line: #2c312e;
+    --line-strong: #454b47;
+    --line-control: #6c736e;
+    --ink: #ecebe5;
+    --ink-2: #b8b6ad;
+    --ink-3: #8f8d84;
+    --cedar: #7fbfa8;
+    --cedar-hover: #98cdb9;
+    --cedar-wash: #1f2e29;
+    --on-cedar: #0e1f1a;
+    --saffron: #e0ae52;
+    --positive: #6cc393;
+    --positive-wash: #183026;
+    --caution: #e2a74a;
+    --caution-wash: #33291a;
+    --critical: #f08a7e;
+    --critical-wash: #3a1f1c;
+    --on-critical: #1a0806;
+    --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.5);
+    --shadow-thumb: 0 1px 2px rgba(0, 0, 0, 0.6);
+  }
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+  --paper: #121412;
+  --surface: #1a1d1b;
+  --surface-sunken: #222624;
+  --sidebar: #161816;
+  --line: #2c312e;
+  --line-strong: #454b47;
+  --line-control: #6c736e;
+  --ink: #ecebe5;
+  --ink-2: #b8b6ad;
+  --ink-3: #8f8d84;
+  --cedar: #7fbfa8;
+  --cedar-hover: #98cdb9;
+  --cedar-wash: #1f2e29;
+  --on-cedar: #0e1f1a;
+  --saffron: #e0ae52;
+  --positive: #6cc393;
+  --positive-wash: #183026;
+  --caution: #e2a74a;
+  --caution-wash: #33291a;
+  --critical: #f08a7e;
+  --critical-wash: #3a1f1c;
+  --on-critical: #1a0806;
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-thumb: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
 :root {
-  font-family: Inter, 'Segoe UI', sans-serif;
-  line-height: 1.5;
+  --font-sans: 'Instrument Sans Variable', 'Instrument Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+
+  --sidebar-width: 232px;
+  --content-max: 1180px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 20px;
   font-weight: 400;
-  color: #111827;
-  background: #f3f6fb;
+  color: var(--ink);
+  background: var(--paper);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-* {
+*,
+*::before,
+*::after {
   box-sizing: border-box;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   margin: 0;
-  min-height: 100%;
   min-height: 100vh;
 }
 
 body {
-  background: linear-gradient(180deg, #f2f6ff 0%, #eef3f9 100%);
+  background: var(--paper);
 }
 
-button, input, select {
+button,
+input,
+select,
+textarea {
   font: inherit;
+  color: inherit;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--cedar);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--cedar-wash);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+  }
 }

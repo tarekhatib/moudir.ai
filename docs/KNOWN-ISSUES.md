@@ -1,51 +1,45 @@
-# Moudir.ai Known Issues & Pilot Limitations
+# Moudir.ai Known Issues & Limitations
 
-This document tracks identified constraints, architectural limitations, and security considerations in the current Moudir.ai pilot release.
+What the current release does not do yet, roughly in order of importance.
 
----
+## Accounts & access
 
-## 1. Authentication & Access Control
+- **No password reset or email.** There's no email sending, so a manager who forgets their
+  password must be given a new account by the owner, and an owner who forgets theirs needs an
+  operator to reset it in the database. Adding a mail provider (and email verification on
+  sign-up) is the next step.
+- **Managers are added with a temporary password** that the owner shares with them, rather than
+  by email invitation.
+- **No two-factor authentication or SSO.**
+- **Two roles only.** Owners manage manager accounts; every manager sees every employee in the
+  organization. There are no per-team permissions.
+- **Organizations can't be renamed or deleted from the dashboard.**
 
-- **Unauthenticated Dashboard & Management API**:
-  - The pilot API endpoints (`/employees`, `/config`, `/reports`) do not currently enforce authentication, session cookies, or JWT verification.
-  - Anyone with network access to the backend host can view employee records and modify configurations.
-  - **Security Mandate**: This API is designed strictly for local demonstration and isolated network testing. It must **not** be deployed to public internet environments or exposed directly to end-user employees without introducing an authentication gateway and RBAC layer.
+## Scaling & operations
 
-- **ID-Only Access**:
-  - Reports and configs are addressed by incremental integer employee IDs (`/reports/{employee_id}`). In production, employee-facing access requires scoped credentials, tenant isolation, and hashed identifiers.
+- **Sign-in rate limiting is in memory, per backend process.** With `WEB_CONCURRENCY=2` the
+  effective limit is up to twice the configured value, and it resets on restart. For several
+  servers, add a shared limiter (e.g. at the proxy, or Redis).
+- **Reports are computed on request** from raw events. That's fine for teams of tens to low
+  hundreds of employees; larger organizations will want pre-aggregated daily scores.
+- **No data retention policy.** Activity is kept until the employee (or organization) is
+  deleted. Decide on a retention period for your customers' jurisdictions and add a scheduled
+  purge.
 
----
+## Scoring
 
-## 2. Telemetry & Scoring Heuristics
+- **Heuristic signals.** Scores and "productive hours" are rule-based estimates from event
+  counts (see [SCORING.md](SCORING.md)). They don't see meetings, calls or offline work, and
+  aren't timesheets or performance ratings.
+- **UTC day boundaries.** Days, weeks and months are bucketed in UTC. Teams far from UTC, or
+  shifts that cross midnight UTC, will see activity split across two days. Per-organization
+  time zones are not supported yet.
+- **The configured schedule, minimum productive hours and maximum idle minutes are stored but
+  not yet used in the score.**
 
-- **Heuristic-Only Productivity Signals**:
-  - "Productive hours" and "Productivity scores" are linear heuristics derived from event frequency (`app_focus`, `browser_tab`, `idle_start`, `login`).
-  - They do not account for passive work (e.g. paper review, phone calls, whiteboard meetings) and are not verified timesheets.
-  - Scores should be treated as high-level indicators rather than definitive performance ratings.
+## Desktop agent
 
-- **Fixed Time Bucketing**:
-  - Daily, weekly, and monthly calculations use UTC midnight boundaries. Shifts spanning midnight or cross-timezone teams may require timezone-aware bucketing in future iterations.
-
----
-
-## 3. Storage & Concurrency
-
-- **SQLite Single-Writer Concurrency**:
-  - SQLite is used for lightweight zero-dependency local pilot setup. Under high-frequency concurrent telemetry ingestion from hundreds of client agents, database lock contention (`database is locked`) may occur.
-  - Migration to PostgreSQL or a distributed time-series store is recommended for production scale.
-
----
-
-## 4. PDF Generation Dependencies
-
-- **System Rendering Libraries**:
-  - WeasyPrint requires native system libraries (Cairo, Pango, GDK-Pixbuf). If these libraries are missing from the host environment, the backend falls back to ReportLab.
-  - If both WeasyPrint and ReportLab fail to load, the PDF export endpoint returns `500 Internal Server Error`.
-
----
-
-## 5. Desktop Agent & Platform Boundaries
-
-- **Agent Scope & Desktop Platforms**:
-  - Windows-specific telemetry hooks, system service daemons, and agent packaging reside in `agent/` and are maintained as a separate subsystem.
-  - macOS and Linux background agent setups are owned independently from this backend and dashboard repository scope.
+- **Windows only.** Active-window and idle tracking use Win32 APIs; the macOS fallback only
+  exists for development.
+- **Not packaged.** The agent runs as a Python script; there's no installer, auto-start service
+  or auto-update yet.
